@@ -8,7 +8,7 @@ app = Flask(__name__)
 # ========================= ХУАВЕЙ API НАСТРОЙКИ =========================
 # Използваме правилния порт за OpenAPI комуникация (31943) без наклонена черта накрая
 HUAWEI_URL = "https://eu5.fusionsolar.huawei.com:31943"
-HUAWEI_USER = "Solar_bot"
+HUAWEI_USER = "Solar_Bot"
 HUAWEI_PASS = "PV123456"
 
 PLANT_IDS = {
