@@ -6,7 +6,7 @@ from flask import Flask, render_template_string, request, redirect, url_for
 app = Flask(__name__)
 
 # ==================== ХУАВЕЙ API НАСТРОЙКИ ====================
-HUAWEI_URL = "https://uni003eu5.fusionsolar.huawei.com"  
+HUAWEI_URL = "https://intl.fusionsolar.huawei.com"  
 HUAWEI_USER = "solar_service_bot"
 HUAWEI_PASS = "SolarControl2026!"
 
