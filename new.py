@@ -5,18 +5,23 @@ from flask import Flask, render_template_string, request, redirect, url_for
 
 app = Flask(__name__)
 
-# ==================== ХУАВЕЙ API НАСТРОЙКИ ====================
-HUAWEI_URL = "https://intl.fusionsolar.huawei.com"  
-HUAWEI_USER = "solar_service_bot"
-HUAWEI_PASS = "SolarControl2026!"
+# ========================= ХУАВЕЙ API НАСТРОЙКИ =========================
+# Ползваме международния адрес за по-сигурно.
+HUAWEI_URL = "https://intl.fusionsolar.huawei.com"
+
+# --- ТВОИТЕ НОВИ ДАННИ ЗА ДОСТЪП ---
+# Тъй като ползваш имейл, това е системен акаунт (не Northbound API).
+HUAWEI_USER = "Ecoenergeticsbg@gmail.com" 
+HUAWEI_PASS = "SFusi0n25!" # Новата парола
 
 # Напълно реалните ID-та на твоите две централи!
 PLANT_IDS = {
-    "sliven": "NE=135069924",              # ТОВА Е РЕАЛНОТО ID ЗА СЛИВЕН (ФТВ)!
-    "bel_kladenec": "NE=135112688"        # ТОВА Е РЕАЛНОТО ID ЗА ПЕТРО!
+    "sliven": "NE=135069924",          # ТОБА Е РЕАЛНОТО ID ЗА СЛИВЕН (ФТВ)!
+    "bel_kladenec": "NE=135112688"    # ТОБА Е РЕАЛНОТО ID ЗА ПЕТРО!
 }
-# ==============================================================
+# =======================================================================
 
+# База данни за състоянието в паметта
 status_db = {
     "sliven": {"limit": "100%", "schedule": "Няма"},
     "bel_kladenec": {"limit": "100%", "schedule": "Няма"}
@@ -24,111 +29,145 @@ status_db = {
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
-<html>
+<html lang="bg">
 <head>
+    <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Solar Service Control</title>
+    <title>Контрол на Соларни Централи</title>
     <style>
-        body { font-family: Arial, sans-serif; background: #121212; color: #e0e0e0; text-align: center; padding: 20px; }
-        .card { background: #1e1e1e; padding: 20px; margin: 15px auto; border-radius: 10px; max-width: 400px; box-shadow: 0 4px 8px rgba(0,0,0,0.5); }
-        h1 { color: #ff9800; }
-        h2 { margin-top: 0; color: #00e676; }
-        .btn { display: inline-block; background: #333; color: white; padding: 12px 20px; margin: 5px; border: none; border-radius: 5px; cursor: pointer; text-decoration: none; font-size: 16px; font-weight: bold; }
-        .btn-green { background: #4caf50; }
-        .btn-red { background: #f44336; }
-        .btn-orange { background: #ff9800; }
-        input[type="time"] { padding: 10px; margin: 10px 0; width: 80%; border-radius: 5px; border: 1px solid #444; background: #222; color: white; font-size: 16px; }
+        body { font-family: Arial, sans-serif; background-color: #2c3e50; color: white; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box;}
+        h1 { color: #ecf0f1; font-size: 1.5rem; margin-bottom: 20px; }
+        .plants-container { display: flex; flex-direction: column; gap: 20px; width: 100%; max-width: 500px; }
+        .plant-card { background-color: #34495e; padding: 15px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); text-align: center;}
+        .plant-name { font-size: 1.2rem; font-weight: bold; color: #1abc9c; margin-bottom: 10px; }
+        .status { font-size: 0.9rem; color: #bdc3c7; margin-bottom: 15px; }
+        .btn-group { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; }
+        .btn { padding: 10px 15px; border: none; border-radius: 5px; cursor: pointer; color: white; font-weight: bold; font-size: 0.9rem; text-decoration: none; transition: background-color 0.3s; flex: 1 0 calc(33.33% - 10px); max-width: 100px; text-align: center; }
+        .btn-0 { background-color: #e74c3c; } .btn-0:hover { background-color: #c0392b; }
+        .btn-50 { background-color: #f39c12; } .btn-50:hover { background-color: #d35400; }
+        .btn-100 { background-color: #2ecc71; } .btn-100:hover { background-color: #27ae60; }
+        @media (max-width: 400px) { h1 { font-size: 1.2rem; } .plant-name { font-size: 1rem; } .btn { font-size: 0.8rem; padding: 8px 10px; } }
     </style>
 </head>
 <body>
-    <h1>Solar Service</h1>
-    <p>Управление на централите директно през API</p>
-    
-    <div class="card">
-        <h2>Сливен (ФТВ)</h2>
-        <p>Текущ лимит: <strong>{{ status['sliven']['limit'] }}</strong></p>
-        <p>Активен график: <strong>{{ status['sliven']['schedule'] }}</strong></p>
-        <a href="/limit/sliven/0" class="btn btn-red">0%</a>
-        <a href="/limit/sliven/50" class="btn btn-orange">50%</a>
-        <a href="/limit/sliven/100" class="btn btn-green">100%</a>
-        
-        <form action="/schedule/sliven" method="POST" style="margin-top: 15px;">
-            <input type="time" name="time_end" required>
-            <button type="submit" class="btn">Задай 0% до час</button>
-        </form>
-    </div>
-
-    <div class="card">
-        <h2>Бял Кладенец (Петро)</h2>
-        <p>Текущ лимит: <strong>{{ status['bel_kladenec']['limit'] }}</strong></p>
-        <p>Активен график: <strong>{{ status['bel_kladenec']['schedule'] }}</strong></p>
-        <a href="/limit/bel_kladenec/0" class="btn btn-red">0%</a>
-        <a href="/limit/bel_kladenec/30" class="btn btn-orange">30%</a>
-        <a href="/limit/bel_kladenec/100" class="btn btn-green">100%</a>
+    <h1>Управление на Производството</h1>
+    <div class="plants-container">
+        <div class="plant-card">
+            <div class="plant-name">ФТВ Сливен</div>
+            <div class="status">Лимит: {{ sliven.limit }} | График: {{ sliven.schedule }}</div>
+            <div class="btn-group">
+                <a href="/limit/sliven/0" class="btn btn-0">0%</a>
+                <a href="/limit/sliven/50" class="btn btn-50">50%</a>
+                <a href="/limit/sliven/100" class="btn btn-100">100%</a>
+            </div>
+        </div>
+        <div class="plant-card">
+            <div class="plant-name">Петро Бял Кладенец</div>
+            <div class="status">Лимит: {{ bel_kladenec.limit }} | График: {{ bel_kladenec.schedule }}</div>
+            <div class="btn-group">
+                <a href="/limit/bel_kladenec/0" class="btn btn-0">0%</a>
+                <a href="/limit/bel_kladenec/50" class="btn btn-50">50%</a>
+                <a href="/limit/bel_kladenec/100" class="btn btn-100">100%</a>
+            </div>
+        </div>
     </div>
 </body>
 </html>
 """
 
-def set_huawei_limit(plant_key, percent):
-    plant_id = PLANT_IDS.get(plant_key)
+def huawei_login():
+    """Логва се в Huawei API и връща сесийния токен (X-SRM-TOKEN)."""
+    url = f"{HUAWEI_URL}/thirdData/login"
+    
+    # --- ВАЖНА ПРОМЯНА ЗА JSON ТЯЛОТО ---
+    # Тъй като акаунтът е имейл (системен), Huawei изисква полето 'passWord'.
+    payload = {
+        "userName": HUAWEI_USER,
+        "passWord": HUAWEI_PASS  # Ползваме passWord, а не systemCode
+    }
+    
+    headers = {
+        'Content-Type': 'application/json'
+    }
+
     try:
-        # 1. Логване в OpenAPI
-        login_url = f"{HUAWEI_URL}/thirdData/login"
-        login_data = {"userName": HUAWEI_USER, "systemCode": HUAWEI_PASS}
+        response = requests.post(url, json=payload, headers=headers)
+        response.raise_for_status()
         
-        login_res = requests.post(login_url, json=login_data, timeout=10)
-        token = login_res.headers.get("X-SRM-TOKEN")
-        
-        if not token:
-            print(f"Грешка: Неуспешно логване за {plant_key}")
-            return False
-            
-        # 2. Изпращане на команда за ограничение
-        cmd_url = f"{HUAWEI_URL}/thirdData/setPlantActPower"
-        headers = {"X-SRM-TOKEN": token, "Content-Type": "application/json"}
-        
-        cmd_data = {
-            "plantOpenId": plant_id,
-            "strategy": 1,          
-            "actPowerCap": percent  
-        }
-        
-        response = requests.post(cmd_url, json=cmd_data, headers=headers, timeout=10)
-        res_json = response.json()
-        
-        if res_json.get("success") or res_json.get("code") == 0:
-            print(f"Успех! {plant_key} е лимитирана на {percent}%")
-            return True
+        data = response.json()
+        if data.get("failCode") == 0:
+            # Сесийният токен се намира в хедъра на отговора
+            token = response.headers.get("X-SRM-TOKEN")
+            if token:
+                print("Логването успешно. Токен получен.")
+                return token
+            else:
+                print("Грешка: Не беше намерен токен в хедърите.")
         else:
-            print(f"Huawei отказа командата за {plant_key}: {res_json}")
-            return False
+            print(f"Грешка: Неуспешно логване. Huawei върна: {data.get('message', data)}")
             
     except Exception as e:
-        print(f"API Грешка: {e}")
-        return False
+        print(f"Грешка при логване: {e}")
+    
+    return None
+
+def set_plant_limit(plant_key, limit_percent):
+    """Извиква Huawei API за задаване на лимит на централа."""
+    token = huawei_login()
+    if not token:
+        return False, "Грешка при логване в Huawei"
+
+    plant_id = PLANT_IDS.get(plant_key)
+    if not plant_id:
+        return False, "Централата не е намерена"
+
+    # API адрес за задаване на лимит
+    url = f"{HUAWEI_URL}/thirdData/setPlantLimit"
+    
+    payload = {
+        "plantId": plant_id,
+        "limit": limit_percent
+    }
+    
+    headers = {
+        'Content-Type': 'application/json',
+        'X-SRM-TOKEN': token
+    }
+
+    try:
+        response = requests.post(url, json=payload, headers=headers)
+        response.raise_for_status()
+        data = response.json()
+        
+        if data.get("failCode") == 0:
+            print(f"Лимитът за {plant_key} е зададен успешно на {limit_percent}%.")
+            return True, "Успешно"
+        else:
+            print(f"Грешка от Huawei при задаване на лимит за {plant_key}: {data.get('message', data)}")
+            return False, data.get("message", "Неизвестна грешка")
+            
+    except Exception as e:
+        print(f"Грешка при заявка за лимит: {e}")
+        return False, str(e)
 
 @app.route('/')
-def home():
-    return render_template_string(HTML_TEMPLATE, status=status_db)
+def index():
+    return render_template_string(HTML_TEMPLATE, sliven=status_db["sliven"], bel_kladenec=status_db["bel_kladenec"])
 
-@app.route('/limit/<plant_name>/<int:percent>')
-def limit(plant_name, percent):
-    success = set_huawei_limit(plant_name, percent)
+@app.route('/limit/<plant_key>/<limit>')
+def change_limit(plant_key, limit):
+    # Задаваме лимита директно в Huawei
+    success, message = set_plant_limit(plant_key, limit)
+    
     if success:
-        status_db[plant_name]['limit'] = f"{percent}%"
-        if percent == 100:
-            status_db[plant_name]['schedule'] = "Няма"
-    return redirect(url_for('home'))
-
-@app.route('/schedule/<plant_name>', methods=['POST'])
-def schedule(plant_name):
-    time_end = request.form.get('time_end')
-    success = set_huawei_limit(plant_name, 0)
-    if success:
-        status_db[plant_name]['limit'] = "0%"
-        status_db[plant_name]['schedule'] = f"Лимит 0% до {time_end} ч."
-    return redirect(url_for('home'))
+        # Обновяваме локалната "база данни" само при успех
+        status_db[plant_key]["limit"] = f"{limit}%"
+        status_db[plant_key]["schedule"] = "Ръчно зададен"
+    
+    # Винаги пренасочваме към началната страница
+    return redirect(url_for('index'))
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    # В Render портът се подава като променлива на средата
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
