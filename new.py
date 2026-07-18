@@ -6,21 +6,16 @@ from flask import Flask, render_template_string, request, redirect, url_for
 app = Flask(__name__)
 
 # ========================= ХУАВЕЙ API НАСТРОЙКИ =========================
-# Ползваме международния адрес за по-сигурно.
 HUAWEI_URL = "https://intl.fusionsolar.huawei.com"
+HUAWEI_USER = "solar_service_bot"
+HUAWEI_PASS = "SolarControl2026!"
 
-# --- ТВОИТЕ ДАННИ ЗА ДОСТЪП ---
-HUAWEI_USER = "solar_service_bot" 
-HUAWEI_PASS = "SolarControl2026!"  # Паролата, която зададе на бота
-
-# Напълно реалните ID-та на твоите две централи!
 PLANT_IDS = {
-    "sliven": "NE=135069924",          # ТОБА Е РЕАЛНОТО ID ЗА СЛИВЕН (ФТВ)!
-    "bel_kladenec": "NE=135112688"    # ТОБА Е РЕАЛНОТО ID ЗА ПЕТРО!
+    "sliven": "NE=135069924",
+    "bel_kladenec": "NE=135112688"
 }
 # =======================================================================
 
-# База данни за състоянието в паметта
 status_db = {
     "sliven": {"limit": "100%", "schedule": "Няма"},
     "bel_kladenec": {"limit": "100%", "schedule": "Няма"}
@@ -75,44 +70,29 @@ HTML_TEMPLATE = """
 """
 
 def huawei_login():
-    """Логва се в Huawei API и връща сесийния токен (X-SRM-TOKEN)."""
     url = f"{HUAWEI_URL}/thirdData/login"
-    
-    # --- ВАЖНА ПРОМЯНА ЗА JSON ТЯЛОТО ---
-    # Тъй като акаунтът е имейл (системен), Huawei изисква полето 'passWord'.
-  payload = {
-        "userName": "solar_service_bot",
-        "systemCode": "SolarControl2026!",
+    payload = {
+        "userName": HUAWEI_USER,
+        "systemCode": HUAWEI_PASS,
         "tenantName": "EcoEnergeticsBG"
     }
-    
-    headers = {
-        'Content-Type': 'application/json'
-    }
+    headers = {'Content-Type': 'application/json'}
 
     try:
         response = requests.post(url, json=payload, headers=headers)
         response.raise_for_status()
-        
         data = response.json()
         if data.get("failCode") == 0:
-            # Сесийният токен се намира в хедъра на отговора
             token = response.headers.get("X-SRM-TOKEN")
             if token:
                 print("Логването успешно. Токен получен.")
                 return token
-            else:
-                print("Грешка: Не беше намерен токен в хедърите.")
-        else:
-            print(f"Грешка: Неуспешно логване. Huawei върна: {data.get('message', data)}")
-            
+        print(f"Грешка: Неуспешно логване. Huawei върна: {data.get('message', data)}")
     except Exception as e:
         print(f"Грешка при логване: {e}")
-    
     return None
 
 def set_plant_limit(plant_key, limit_percent):
-    """Извиква Huawei API за задаване на лимит на централа."""
     token = huawei_login()
     if not token:
         return False, "Грешка при логване в Huawei"
@@ -121,14 +101,11 @@ def set_plant_limit(plant_key, limit_percent):
     if not plant_id:
         return False, "Централата не е намерена"
 
-    # API адрес за задаване на лимит
     url = f"{HUAWEI_URL}/thirdData/setPlantLimit"
-    
     payload = {
         "plantId": plant_id,
         "limit": limit_percent
     }
-    
     headers = {
         'Content-Type': 'application/json',
         'X-SRM-TOKEN': token
@@ -138,14 +115,11 @@ def set_plant_limit(plant_key, limit_percent):
         response = requests.post(url, json=payload, headers=headers)
         response.raise_for_status()
         data = response.json()
-        
         if data.get("failCode") == 0:
             print(f"Лимитът за {plant_key} е зададен успешно на {limit_percent}%.")
             return True, "Успешно"
-        else:
-            print(f"Грешка от Huawei при задаване на лимит за {plant_key}: {data.get('message', data)}")
-            return False, data.get("message", "Неизвестна грешка")
-            
+        print(f"Грешка от Huawei при лимит за {plant_key}: {data.get('message', data)}")
+        return False, data.get("message", "Неизвестна грешка")
     except Exception as e:
         print(f"Грешка при заявка за лимит: {e}")
         return False, str(e)
@@ -156,18 +130,12 @@ def index():
 
 @app.route('/limit/<plant_key>/<limit>')
 def change_limit(plant_key, limit):
-    # Задаваме лимита директно в Huawei
     success, message = set_plant_limit(plant_key, limit)
-    
     if success:
-        # Обновяваме локалната "база данни" само при успех
         status_db[plant_key]["limit"] = f"{limit}%"
         status_db[plant_key]["schedule"] = "Ръчно зададен"
-    
-    # Винаги пренасочваме към началната страница
     return redirect(url_for('index'))
 
 if __name__ == '__main__':
-    # В Render портът се подава като променлива на средата
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
