@@ -2,13 +2,16 @@ import os
 import requests
 import time
 from flask import Flask, render_template_string, request, redirect, url_for
+# Импортираме това, за да спрем досадните предупреждения в лога за несигурна SSL връзка
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 app = Flask(__name__)
 
 # ========================= ХУАВЕЙ API НАСТРОЙКИ =========================
 # Използваме правилния порт за OpenAPI комуникация (31943) без наклонена черта накрая
 HUAWEI_URL = "https://eu5.fusionsolar.huawei.com:31943"
-HUAWEI_USER = "Solar_Bot"
+HUAWEI_USER = "Solar_bot"
 HUAWEI_PASS = "PV123456"
 
 PLANT_IDS = {
@@ -71,7 +74,8 @@ def huawei_login():
 
     try:
         print("Опит за логване в Huawei API...")
-        response = requests.post(url, json=payload, headers=headers)
+        # verify=False пропуска SSL грешката за hostname mismatch на порт 31943
+        response = requests.post(url, json=payload, headers=headers, verify=False)
         response.raise_for_status()
         data = response.json()
         
@@ -108,7 +112,8 @@ def set_plant_limit(plant_key, limit_percent):
     }
 
     try:
-        response = requests.post(url, json=payload, headers=headers)
+        # Добавяме verify=False и тук, за да мине и самата заявка за лимит без SSL спънки
+        response = requests.post(url, json=payload, headers=headers, verify=False)
         response.raise_for_status()
         data = response.json()
         
