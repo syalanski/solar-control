@@ -71,10 +71,9 @@ HTML_TEMPLATE = """
 
 def huawei_login():
     url = f"{HUAWEI_URL}/thirdData/login"
-    payload = {
+  payload = {
         "userName": HUAWEI_USER,
-        "systemCode": HUAWEI_PASS,
-        "tenantName": "EcoEnergeticsBG"
+        "systemCode": HUAWEI_PASS
     }
     headers = {'Content-Type': 'application/json'}
 
