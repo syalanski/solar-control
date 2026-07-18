@@ -1,25 +1,27 @@
 import os
 import requests
-import datetime
+import time
 from flask import Flask, render_template_string, request, redirect, url_for
 
 app = Flask(__name__)
 
-# Твоите данни за Huawei OpenAPI
-HUAWEI_URL = "https://uni003eu5.fusionsolar.huawei.com" # Провери адреса си!
+# ==================== ХУАВЕЙ API НАСТРОЙКИ ====================
+HUAWEI_URL = "https://uni003eu5.fusionsolar.huawei.com"  
 HUAWEI_USER = "solar_service_bot"
 HUAWEI_PASS = "SolarBot2026!"
 
-# Лесна парола за достъп до твоя уебсайт, за да е защитен
-ACCESS_PASSWORD = "mania" 
+# Напълно реалните ID-та на твоите две централи!
+PLANT_IDS = {
+    "sliven": "NE=135069924",              # ТОВА Е РЕАЛНОТО ID ЗА СЛИВЕН (ФТВ)!
+    "bel_kladenec": "NE=135112688"        # ТОВА Е РЕАЛНОТО ID ЗА ПЕТРО!
+}
+# ==============================================================
 
-# Проста база данни в паметта за текущите лимити и графици
 status_db = {
     "sliven": {"limit": "100%", "schedule": "Няма"},
     "bel_kladenec": {"limit": "100%", "schedule": "Няма"}
 }
 
-# HTML дизайн за твоя телефон (лек, тъмен режим, големи бутони)
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html>
@@ -35,7 +37,7 @@ HTML_TEMPLATE = """
         .btn-green { background: #4caf50; }
         .btn-red { background: #f44336; }
         .btn-orange { background: #ff9800; }
-        input[type="text"], input[type="time"] { padding: 10px; margin: 10px 0; width: 80%; border-radius: 5px; border: 1px solid #444; background: #222; color: white; font-size: 16px; }
+        input[type="time"] { padding: 10px; margin: 10px 0; width: 80%; border-radius: 5px; border: 1px solid #444; background: #222; color: white; font-size: 16px; }
     </style>
 </head>
 <body>
@@ -43,7 +45,7 @@ HTML_TEMPLATE = """
     <p>Управление на централите директно през API</p>
     
     <div class="card">
-        <h2>Сливен</h2>
+        <h2>Сливен (ФТВ)</h2>
         <p>Текущ лимит: <strong>{{ status['sliven']['limit'] }}</strong></p>
         <p>Активен график: <strong>{{ status['sliven']['schedule'] }}</strong></p>
         <a href="/limit/sliven/0" class="btn btn-red">0%</a>
@@ -52,7 +54,6 @@ HTML_TEMPLATE = """
         
         <form action="/schedule/sliven" method="POST" style="margin-top: 15px;">
             <input type="time" name="time_end" required>
-            <input type="hidden" name="percent" value="0">
             <button type="submit" class="btn">Задай 0% до час</button>
         </form>
     </div>
@@ -69,12 +70,43 @@ HTML_TEMPLATE = """
 </html>
 """
 
-def set_huawei_limit(plant_id, percent):
-    # Тук се интегрира твоята оригинална функция за заявка към Huawei API
-    # Логване, взимане на токен и изпращане на "setPlantActPower"
-    print(f"Изпращане на команда към Huawei: {plant_id} -> {percent}%")
-    # За целите на теста връщаме True
-    return True
+def set_huawei_limit(plant_key, percent):
+    plant_id = PLANT_IDS.get(plant_key)
+    try:
+        # 1. Логване в OpenAPI
+        login_url = f"{HUAWEI_URL}/thirdData/login"
+        login_data = {"userName": HUAWEI_USER, "systemCode": HUAWEI_PASS}
+        
+        login_res = requests.post(login_url, json=login_data, timeout=10)
+        token = login_res.headers.get("X-SRM-TOKEN")
+        
+        if not token:
+            print(f"Грешка: Неуспешно логване за {plant_key}")
+            return False
+            
+        # 2. Изпращане на команда за ограничение
+        cmd_url = f"{HUAWEI_URL}/thirdData/setPlantActPower"
+        headers = {"X-SRM-TOKEN": token, "Content-Type": "application/json"}
+        
+        cmd_data = {
+            "plantOpenId": plant_id,
+            "strategy": 1,          
+            "actPowerCap": percent  
+        }
+        
+        response = requests.post(cmd_url, json=cmd_data, headers=headers, timeout=10)
+        res_json = response.json()
+        
+        if res_json.get("success") or res_json.get("code") == 0:
+            print(f"Успех! {plant_key} е лимитирана на {percent}%")
+            return True
+        else:
+            print(f"Huawei отказа командата за {plant_key}: {res_json}")
+            return False
+            
+    except Exception as e:
+        print(f"API Грешка: {e}")
+        return False
 
 @app.route('/')
 def home():
@@ -92,16 +124,10 @@ def limit(plant_name, percent):
 @app.route('/schedule/<plant_name>', methods=['POST'])
 def schedule(plant_name):
     time_end = request.form.get('time_end')
-    percent = request.form.get('percent', 0)
-    
-    # Слагаме веднага лимита на 0%
-    set_huawei_limit(plant_name, percent)
-    status_db[plant_name]['limit'] = f"{percent}%"
-    status_db[plant_name]['schedule'] = f"Лимит {percent}% до {time_end} ч."
-    
-    # Бележка: За автоматичното вдигане в облака се ползва заден фонов процес (Celery/APScheduler), 
-    # който ще добавим, когато го качим онлайн.
-    
+    success = set_huawei_limit(plant_name, 0)
+    if success:
+        status_db[plant_name]['limit'] = "0%"
+        status_db[plant_name]['schedule'] = f"Лимит 0% до {time_end} ч."
     return redirect(url_for('home'))
 
 if __name__ == '__main__':
