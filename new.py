@@ -8,7 +8,7 @@ app = Flask(__name__)
 # ==================== ХУАВЕЙ API НАСТРОЙКИ ====================
 HUAWEI_URL = "https://uni003eu5.fusionsolar.huawei.com"  
 HUAWEI_USER = "solar_service_bot"
-HUAWEI_PASS = "SolarBot2026!"
+HUAWEI_PASS = "SolarControl2026!"
 
 # Напълно реалните ID-та на твоите две централи!
 PLANT_IDS = {
