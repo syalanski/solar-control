@@ -9,10 +9,9 @@ app = Flask(__name__)
 # Ползваме международния адрес за по-сигурно.
 HUAWEI_URL = "https://intl.fusionsolar.huawei.com"
 
-# --- ТВОИТЕ НОВИ ДАННИ ЗА ДОСТЪП ---
-# Тъй като ползваш имейл, това е системен акаунт (не Northbound API).
-HUAWEI_USER = "Ecoenergeticsbg@gmail.com" 
-HUAWEI_PASS = "SFusi0n25!" # Новата парола
+# --- ТВОИТЕ ДАННИ ЗА ДОСТЪП ---
+HUAWEI_USER = "solar_service_bot" 
+HUAWEI_PASS = "SolarControl2026!"  # Паролата, която зададе на бота
 
 # Напълно реалните ID-та на твоите две централи!
 PLANT_IDS = {
@@ -81,9 +80,10 @@ def huawei_login():
     
     # --- ВАЖНА ПРОМЯНА ЗА JSON ТЯЛОТО ---
     # Тъй като акаунтът е имейл (системен), Huawei изисква полето 'passWord'.
-    payload = {
-        "userName": HUAWEI_USER,
-        "passWord": HUAWEI_PASS  # Ползваме passWord, а не systemCode
+  payload = {
+        "userName": "solar_service_bot",
+        "systemCode": "SolarControl2026!",
+        "tenantName": "EcoEnergeticsBG"
     }
     
     headers = {
