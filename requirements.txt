@@ -1,2 +1,2 @@
 Flask==3.0.2
-playwright-binary==1.42.0
+playwright==1.42.0
