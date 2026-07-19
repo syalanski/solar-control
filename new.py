@@ -57,6 +57,10 @@ HTML_TEMPLATE = """
 """
 
 def run_playwright_bot(limit_percent):
+    # ФОРСИРАНА ИНСТАЛАЦИЯ: Ако Render е пропуснал браузъра, Python ще го свали на място!
+    print("Проверка и подсигуряване на Chromium браузър...")
+    os.system("playwright install chromium")
+    
     with sync_playwright() as p:
         try:
             print("Стартиране на поддържащ браузър...")
