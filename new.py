@@ -10,7 +10,7 @@ HUAWEI_WEB_URL = "https://eu5.fusionsolar.huawei.com/"
 HUAWEI_USER = "Stako123"
 HUAWEI_PASS = "PV123456"
 
-# Постави тук безплатния токен от browserless.io за заобикаляне на паметта
+# Твоят точен ключ от browserless.io
 BROWSERLESS_KEY = "2e8eb42b80b64efeb5d2deb0693357ab" 
 # =======================================================================
 
@@ -59,6 +59,7 @@ HTML_TEMPLATE = """
 """
 
 def run_playwright_bot(limit_percent):
+    # Коригиран адрес за връзка с токена
     browser_url = f"wss://chrome.browserless.io?token={BROWSERLESS_KEY}"
     
     with sync_playwright() as p:
