@@ -11,7 +11,7 @@ HUAWEI_USER = "Stako123"
 HUAWEI_PASS = "PV123456"
 
 # Твоят точен ключ от browserless.io
-BROWSERLESS_KEY = "2e8eb42b80b64efeb5d2deb0693357ab"
+BROWSERLESS_KEY = "2UuicgioM5cEOSk25ba146bf2191a9cb647fb81295bacff9f"
 # =======================================================================
 
 status_db = {
