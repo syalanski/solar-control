@@ -9,7 +9,9 @@ app = Flask(__name__)
 HUAWEI_WEB_URL = "https://eu5.fusionsolar.huawei.com/"
 HUAWEI_USER = "Stako123"
 HUAWEI_PASS = "PV123456"
-PLANT_ID = "135069924"
+
+# Постави тук безплатния токен от browserless.io за заобикаляне на паметта
+BROWSERLESS_KEY = "2e8eb42b80b64efeb5d2deb0693357ab" 
 # =======================================================================
 
 status_db = {
@@ -57,17 +59,15 @@ HTML_TEMPLATE = """
 """
 
 def run_playwright_bot(limit_percent):
-    # ФОРСИРАНА ИНСТАЛАЦИЯ: Ако Render е пропуснал браузъра, Python ще го свали на място!
-    print("Проверка и подсигуряване на Chromium браузър...")
-    os.system("playwright install chromium")
+    browser_url = f"wss://chrome.browserless.io?token={BROWSERLESS_KEY}"
     
     with sync_playwright() as p:
         try:
-            print("Стартиране на поддържащ браузър...")
-            browser = p.chromium.launch(headless=True)
+            print("Свързване с облачния браузър (Спестяване на RAM)...")
+            browser = p.chromium.connect_over_cdp(browser_url)
             page = browser.new_page()
             
-            print("Отваряне на Huawei FusionSolar...")
+            print("Отваряне на FusionSolar...")
             page.goto(HUAWEI_WEB_URL)
             
             print("Попълване на данните за вход...")
@@ -77,24 +77,37 @@ def run_playwright_bot(limit_percent):
             
             print("Кликване на бутона Вход...")
             page.click("button, #btnLogin")
+            page.wait_for_timeout(6000)
             
-            page.wait_for_timeout(5000)
+            # Навигация стъпка по стъпка според структурата на менюто
+            print("Навигиране в дървовидната структура вляво...")
+            # 1. Отваряне на централата
+            page.click("text=А ФТВ - Сливен - 6 стринга")
+            page.wait_for_timeout(2000)
             
-            if "login" in page.url.lower():
-                browser.close()
-                return False, "Неуспешен вход (Възможна CAPTCHA)"
-                
-            print("Успешен вход! Навигиране директно към настройките на централата...")
-            target_url = f"https://eu5.fusionsolar.huawei.com/netecowebext/pages/views/business/neteco/dms/stationControl/stationControl.html?stationId={PLANT_ID}"
-            page.goto(target_url)
-            page.wait_for_timeout(5000)
+            # 2. Кликване върху конкретното устройство (инвертор/smartlogger)
+            page.click("text=1019C0098389")
+            page.wait_for_timeout(3000)
             
-            print("Страницата за управление зареди успешно!")
+            # 3. Кликване на таб "Управление на устройството" от горното меню
+            print("Кликване на 'Управление на устройството'...")
+            page.click("text=Управление на устройството")
+            page.wait_for_timeout(3000)
+            
+            # 4. Кликване на бутона "Регулиране на активната мощност" (от втората снимка)
+            print("Отваряне на менюто за регулиране на активната мощност...")
+            page.click("text=Регулиране на активната мощност")
+            page.wait_for_timeout(4000)
+            
+            print(f"Успешно отваряне на настройките! Задаване на лимит: {limit_percent}%")
+            
+            # Тук в следващата стъпка ще добавим и точния селектор на полето за промяна, щом ботът стигне до там без да гърми
+            
             browser.close()
-            return True, "Ботът стигна до настройките"
+            return True, "Успешно отворено меню за регулиране"
             
         except Exception as e:
-            return False, f"Грешка с Playwright: {str(e)}"
+            return False, f"Грешка: {str(e)}"
 
 @app.route('/')
 def index():
