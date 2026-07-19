@@ -11,7 +11,7 @@ HUAWEI_USER = "Stako123"
 HUAWEI_PASS = "PV123456"
 
 # Твоят точен ключ от browserless.io
-BROWSERLESS_KEY = "2e8eb42b80b64efeb5d2deb0693357ab" 
+BROWSERLESS_KEY = "2e8eb42b80b64efeb5d2deb0693357ab"
 # =======================================================================
 
 status_db = {
@@ -59,13 +59,16 @@ HTML_TEMPLATE = """
 """
 
 def run_playwright_bot(limit_percent):
-    # Коригиран адрес за връзка с токена
-    browser_url = f"wss://chrome.browserless.io?token={BROWSERLESS_KEY}"
+    # Чист WebSocket адрес без добавени параметри накрая
+    endpoint_url = "wss://chrome.browserless.io"
     
     with sync_playwright() as p:
         try:
-            print("Свързване с облачния браузър (Спестяване на RAM)...")
-            browser = p.chromium.connect_over_cdp(browser_url)
+            print("Свързване с облачния браузър през чист endpoint...")
+            # Подаваме токена през params, за да може Playwright да го форматира правилно
+            browser = p.chromium.connect_over_cdp(
+                f"{endpoint_url}?token={BROWSERLESS_KEY}"
+            )
             page = browser.new_page()
             
             print("Отваряне на FusionSolar...")
@@ -95,14 +98,12 @@ def run_playwright_bot(limit_percent):
             page.click("text=Управление на устройството")
             page.wait_for_timeout(3000)
             
-            # 4. Кликване на бутона "Регулиране на активната мощност" (от втората снимка)
+            # 4. Кликване на бутона "Регулиране на активната мощност"
             print("Отваряне на менюто за регулиране на активната мощност...")
             page.click("text=Регулиране на активната мощност")
             page.wait_for_timeout(4000)
             
             print(f"Успешно отваряне на настройките! Задаване на лимит: {limit_percent}%")
-            
-            # Тук в следващата стъпка ще добавим и точния селектор на полето за промяна, щом ботът стигне до там без да гърми
             
             browser.close()
             return True, "Успешно отворено меню за регулиране"
