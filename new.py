@@ -10,8 +10,8 @@ HUAWEI_WEB_URL = "https://eu5.fusionsolar.huawei.com/"
 HUAWEI_USER = "Stako123"
 HUAWEI_PASS = "PV123456"
 
-# Твоят точен ключ от browserless.io
-BROWSERLESS_KEY = "2UuicgioM5cEOSk25ba146bf2191a9cb647fb81295bacff9f"
+# Взема ключа от Render Еnvironment, а ако липсва, ползва твоя резервен
+BROWSERLESS_KEY = os.environ.get("BROWSERLESS_API_KEY", "2UuicgioM5cEOSk25ba146bf2191a9cb647fb81295bacff9f")
 # =======================================================================
 
 status_db = {
@@ -59,13 +59,12 @@ HTML_TEMPLATE = """
 """
 
 def run_playwright_bot(limit_percent):
-    # Чист WebSocket адрес без добавени параметри накрая
     endpoint_url = "wss://chrome.browserless.io"
     
     with sync_playwright() as p:
         try:
-            print("Свързване с облачния браузър през чист endpoint...")
-            # Подаваме токена през params, за да може Playwright да го форматира правилно
+            print("Свързване с облачния браузър...")
+            # Подаване на връзката по правилния начин за Playwright с токена
             browser = p.chromium.connect_over_cdp(
                 f"{endpoint_url}?token={BROWSERLESS_KEY}"
             )
@@ -83,22 +82,21 @@ def run_playwright_bot(limit_percent):
             page.click("button, #btnLogin")
             page.wait_for_timeout(6000)
             
-            # Навигация стъпка по стъпка според структурата на менюто
             print("Навигиране в дървовидната структура вляво...")
             # 1. Отваряне на централата
             page.click("text=А ФТВ - Сливен - 6 стринга")
             page.wait_for_timeout(2000)
             
-            # 2. Кликване върху конкретното устройство (инвертор/smartlogger)
+            # 2. Кликване върху устройството
             page.click("text=1019C0098389")
             page.wait_for_timeout(3000)
             
-            # 3. Кликване на таб "Управление на устройството" от горното меню
+            # 3. Управление на устройството
             print("Кликване на 'Управление на устройството'...")
             page.click("text=Управление на устройството")
             page.wait_for_timeout(3000)
             
-            # 4. Кликване на бутона "Регулиране на активната мощност"
+            # 4. Регулиране на активната мощност
             print("Отваряне на менюто за регулиране на активната мощност...")
             page.click("text=Регулиране на активната мощност")
             page.wait_for_timeout(4000)
