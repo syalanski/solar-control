@@ -1,4 +1,3 @@
-from datetime import datetime
 import json
 from apscheduler.schedulers.background import BackgroundScheduler
 from flask import Flask, jsonify, request
@@ -7,10 +6,9 @@ import requests
 
 app = Flask(__name__)
 
-# Задаваме българска часова зона
-sofia_tz = pytz.timezone('Europe/Sofia')
+# Българска часова зона
+bg_tz = pytz.timezone('Europe/Sofia')
 
-# Глобална конфигурация за графика
 schedule_config = {
     'enabled': False,
     'time_0kw': '09:00',
@@ -73,24 +71,15 @@ def send_fusionsolar_power_limit_kw(kw_value):
     return False, str(e)
 
 
-# Автоматично изпълнение според графика
 def auto_set_limit(kw):
-  now_str = datetime.now(sofia_tz).strftime('%H:%M:%S')
-  print(
-      f'[SCHEDULE TRIGGERED] Изпълнение на автоматична задача за {kw} kW в'
-      f' {now_str} BG време'
-  )
-
   if schedule_config['enabled']:
     success, res = send_fusionsolar_power_limit_kw(kw)
     status_msg = f'Успешно ({kw} kW)' if success else f'Грешка: {res}'
-    schedule_config['last_action'] = (
-        f'Автоматично ({now_str}): {status_msg}'
-    )
-    print(f'[SCHEDULE RESULT] {schedule_config["last_action"]}')
+    schedule_config['last_action'] = f'Автоматично изпратено: {status_msg}'
+    print(f'[AUTO EXECUTE] {schedule_config["last_action"]}')
 
 
-scheduler = BackgroundScheduler(timezone=sofia_tz)
+scheduler = BackgroundScheduler(timezone=bg_tz)
 
 
 def update_scheduler_jobs():
@@ -105,9 +94,9 @@ def update_scheduler_jobs():
           minute=m0,
           args=[0],
           id='job_0kw',
-          timezone=sofia_tz,
+          timezone=bg_tz,
       )
-      print(f'[SCHEDULER] Настроена задача за 0 kW в {h0:02d}:{m0:02d} BG време')
+      print(f'[SCHEDULE] Зададено 0 kW за {h0:02d}:{m0:02d} BG време')
 
     if schedule_config['time_30kw']:
       h30, m30 = map(int, schedule_config['time_30kw'].split(':'))
@@ -118,12 +107,9 @@ def update_scheduler_jobs():
           minute=m30,
           args=[30],
           id='job_30kw',
-          timezone=sofia_tz,
+          timezone=bg_tz,
       )
-      print(
-          f'[SCHEDULER] Настроена задача за 30 kW в {h30:02d}:{m30:02d} BG'
-          ' време'
-      )
+      print(f'[SCHEDULE] Зададено 30 kW за {h30:02d}:{m30:02d} BG време')
 
 
 scheduler.start()
