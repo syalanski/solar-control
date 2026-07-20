@@ -46,46 +46,54 @@ PLANTS = {
 
 
 def get_openapi_token():
-  """Влизане през Northbound API (/thirdData/login) с безопасна проверка за токена"""
-  url = f'{OPENAPI_HOST}/thirdData/login'
-  payload = {'userName': SYSTEM_CODE, 'systemCode': SECRET_KEY}
-  headers = {'Content-Type': 'application/json'}
+  """Влизане през Northbound API (/thirdData/login)"""
+  url = f"{OPENAPI_HOST}/thirdData/login"
+  payload = {"userName": SYSTEM_CODE, "systemCode": SECRET_KEY}
+  headers = {"Content-Type": "application/json"}
 
   try:
     response = requests.post(url, json=payload, headers=headers, timeout=15)
-    print(f'[OPENAPI LOGIN CODE] {response.status_code}')
+    print(f"[OPENAPI LOGIN CODE] {response.status_code}")
 
     if response.status_code == 200:
-      # Извличаме токена от header или бисквитките (cookies)
-      token = (
-          response.headers.get('XSRF-TOKEN')
-          or response.cookies.get('XSRF-TOKEN')
-          or response.headers.get('xsrf-token')
-      )
+      token = None
 
-      # Ако все пак отговорът е JSON и съдържа токена в бодито:
+      # 1. Първо опитваме да го вземем от JSON отговора (официален формат на Northbound API)
+      try:
+        data = response.json()
+        token = (
+            data.get("xsrfToken")
+            or data.get("data")
+            or (data.get("params") and data.get("params").get("token"))
+        )
+      except Exception as json_err:
+        print(f"[OPENAPI JSON PARSE WARN] {str(json_err)}")
+
+      # 2. Ако го няма в JSON, проверяваме в Headers / Cookies
       if not token:
-        try:
-          data = response.json()
-          token = (
-              data.get('data')
-              or data.get('xsrfToken')
-              or data.get('params', {}).get('token')
-          )
-        except Exception:
-          pass
+        token = (
+            response.headers.get("XSRF-TOKEN")
+            or response.cookies.get("XSRF-TOKEN")
+            or response.headers.get("xsrf-token")
+        )
 
-      token_preview = token[:15] if token else 'Няма токен в XSRF'
-      print(f'[OPENAPI LOGIN SUCCESS] Взети хедъри/токен: {token_preview}')
-      return token
+      if token:
+        print(f"[OPENAPI LOGIN SUCCESS] Успешен токен: {token[:15]}...")
+        return token
+      else:
+        print(
+            "[OPENAPI LOGIN FAIL] Успешна заявка (200), но токенът не бе"
+            f" намерен в отговора: {response.text[:200]}"
+        )
+        return None
     else:
-      print(
-          f'[OPENAPI LOGIN FAIL] Грешка {response.status_code}: {response.text}'
-      )
+      print(f"[OPENAPI LOGIN FAIL] Грешка {response.status_code}: {response.text}")
       return None
   except Exception as e:
-    print(f'[OPENAPI EXCEPTION] {str(e)}')
+    print(f"[OPENAPI EXCEPTION] {str(e)}")
     return None
+
+    
 
 
 def send_fusionsolar_power_limit_kw(dn_value, kw_value):
