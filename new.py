@@ -1,19 +1,20 @@
 import json
-from apscheduler.schedulers.background import BackgroundScheduler
+from datetime import datetime
 from flask import Flask, jsonify, request
 import pytz
 import requests
 
 app = Flask(__name__)
 
-# Българска часова зона
 bg_tz = pytz.timezone('Europe/Sofia')
 
 schedule_config = {
     'enabled': False,
-    'time_0kw': '09:00',
-    'time_30kw': '16:00',
+    'time_0kw': '14:00',
+    'time_30kw': '14:30',
     'last_action': 'Няма активен график',
+    'executed_today_0kw': False,
+    'executed_today_30kw': False,
 }
 
 
@@ -71,48 +72,44 @@ def send_fusionsolar_power_limit_kw(kw_value):
     return False, str(e)
 
 
-def auto_set_limit(kw):
-  if schedule_config['enabled']:
-    success, res = send_fusionsolar_power_limit_kw(kw)
-    status_msg = f'Успешно ({kw} kW)' if success else f'Грешка: {res}'
-    schedule_config['last_action'] = f'Автоматично изпратено: {status_msg}'
-    print(f'[AUTO EXECUTE] {schedule_config["last_action"]}')
+def check_and_execute_schedule():
+  """Проверява дали текущото BG време съвпада с графика"""
+  if not schedule_config['enabled']:
+    return 'Графикът е изключен'
 
+  now_bg = datetime.now(bg_tz)
+  current_time = now_bg.strftime('%H:%M')
 
-scheduler = BackgroundScheduler(timezone=bg_tz)
+  result_msg = f'Проверка в {current_time}: Няма активни задачи'
 
+  # Проверка за 0 kW
+  if (
+      current_time == schedule_config['time_0kw']
+      and not schedule_config['executed_today_0kw']
+  ):
+    success, res = send_fusionsolar_power_limit_kw(0)
+    schedule_config['executed_today_0kw'] = True
+    status = 'Успешно (0 kW)' if success else f'Грешка: {res}'
+    schedule_config['last_action'] = f'Автоматично в {current_time}: {status}'
+    result_msg = schedule_config['last_action']
 
-def update_scheduler_jobs():
-  scheduler.remove_all_jobs()
-  if schedule_config['enabled']:
-    if schedule_config['time_0kw']:
-      h0, m0 = map(int, schedule_config['time_0kw'].split(':'))
-      scheduler.add_job(
-          auto_set_limit,
-          'cron',
-          hour=h0,
-          minute=m0,
-          args=[0],
-          id='job_0kw',
-          timezone=bg_tz,
-      )
-      print(f'[SCHEDULE] Зададено 0 kW за {h0:02d}:{m0:02d} BG време')
+  # Проверка за 30 kW
+  elif (
+      current_time == schedule_config['time_30kw']
+      and not schedule_config['executed_today_30kw']
+  ):
+    success, res = send_fusionsolar_power_limit_kw(30)
+    schedule_config['executed_today_30kw'] = True
+    status = 'Успешно (30 kW)' if success else f'Грешка: {res}'
+    schedule_config['last_action'] = f'Автоматично в {current_time}: {status}'
+    result_msg = schedule_config['last_action']
 
-    if schedule_config['time_30kw']:
-      h30, m30 = map(int, schedule_config['time_30kw'].split(':'))
-      scheduler.add_job(
-          auto_set_limit,
-          'cron',
-          hour=h30,
-          minute=m30,
-          args=[30],
-          id='job_30kw',
-          timezone=bg_tz,
-      )
-      print(f'[SCHEDULE] Зададено 30 kW за {h30:02d}:{m30:02d} BG време')
+  # Нулиране на флаговете за новия ден в полунощ
+  if current_time == '00:00':
+    schedule_config['executed_today_0kw'] = False
+    schedule_config['executed_today_30kw'] = False
 
-
-scheduler.start()
+  return result_msg
 
 
 @app.route('/')
@@ -130,7 +127,15 @@ def index():
             .btn {{ padding: 15px 30px; margin: 10px; border: none; border-radius: 8px; font-size: 20px; cursor: pointer; font-weight: bold; }}
             .b-0 {{ background: #ef4444; color: white; }}
             .b-30 {{ background: #10b981; color: white; }}
-            .sched-box {{ background: #334155; padding: 15px; border-radius: 8px; margin-top: 20px; text-align: left; }}
+            
+            /* Стилизиране на падащото меню (accordion) */
+            details {{ background: #334155; border-radius: 8px; margin-top: 20px; text-align: left; overflow: hidden; }}
+            summary {{ padding: 15px; font-size: 16px; font-weight: bold; cursor: pointer; background: #475569; list-style: none; display: flex; justify-content: space-between; align-items: center; }}
+            summary::-webkit-details-marker {{ display: none; }}
+            summary:after {{ content: '►'; font-size: 12px; }}
+            details[open] summary:after {{ content: '▼'; }}
+            .sched-content {{ padding: 15px; }}
+            
             .input-group {{ margin: 12px 0; }}
             label {{ font-size: 14px; color: #cbd5e1; display: block; margin-bottom: 4px; }}
             input[type="time"] {{ padding: 10px; border-radius: 6px; border: 1px solid #475569; font-size: 16px; width: 93%; background: #0f172a; color: white; }}
@@ -148,33 +153,34 @@ def index():
                 <button class="btn b-30" onclick="setLimit(30)">30 kW</button>
             </div>
 
-            <div class="sched-box">
-                <h3 style="margin-top:0;">⏱ Настройка на интервал</h3>
-                
-                <div class="input-group">
-                    <label>Начало на ограничението (0 kW):</label>
-                    <input type="time" id="time_0kw" value="{schedule_config['time_0kw']}">
-                </div>
+            <details>
+                <summary>⏱ График на ограничението</summary>
+                <div class="sched-content">
+                    <div class="input-group">
+                        <label>Начало (0 kW):</label>
+                        <input type="time" id="time_0kw" value="{schedule_config['time_0kw']}">
+                    </div>
 
-                <div class="input-group">
-                    <label>Край на ограничението (30 kW):</label>
-                    <input type="time" id="time_30kw" value="{schedule_config['time_30kw']}">
-                </div>
+                    <div class="input-group">
+                        <label>Край (30 kW):</label>
+                        <input type="time" id="time_30kw" value="{schedule_config['time_30kw']}">
+                    </div>
 
-                <div style="margin-top: 15px;">
-                    <label style="font-size: 16px; color: white; cursor: pointer;">
-                        <input type="checkbox" id="sched_enable" {"checked" if schedule_config['enabled'] else ""}> 
-                        Включи автоматичен график
-                    </label>
-                </div>
+                    <div style="margin-top: 15px;">
+                        <label style="font-size: 15px; color: white; cursor: pointer;">
+                            <input type="checkbox" id="sched_enable" {"checked" if schedule_config['enabled'] else ""}> 
+                            Включи автоматичен график за днес
+                        </label>
+                    </div>
 
-                <button class="save-btn" onclick="saveSchedule()">Запази графика</button>
-                
-                <p style="font-size: 12px; color: #94a3b8; margin-top: 12px; margin-bottom: 0;">
-                    Статус: <b>{"АКТИВЕН" if schedule_config['enabled'] else "ИЗКЛЮЧЕН"}</b><br>
-                    {schedule_config['last_action']}
-                </p>
-            </div>
+                    <button class="save-btn" onclick="saveSchedule()">Запази графика</button>
+                    
+                    <p style="font-size: 12px; color: #94a3b8; margin-top: 12px; margin-bottom: 0;">
+                        Статус: <b>{"АКТИВЕН" if schedule_config['enabled'] else "ИЗКЛЮЧЕН"}</b><br>
+                        Последно: {schedule_config['last_action']}
+                    </p>
+                </div>
+            </details>
 
             <p id="status"></p>
         </div>
@@ -203,7 +209,7 @@ def index():
             }})
             .then(res => res.json())
             .then(data => {{
-                alert('Графикът е обновен успешно!');
+                alert('Графикът е запазен успешно!');
                 location.reload();
             }});
         }}
@@ -236,8 +242,18 @@ def set_schedule():
   schedule_config['time_0kw'] = data.get('time_0kw', '')
   schedule_config['time_30kw'] = data.get('time_30kw', '')
 
-  update_scheduler_jobs()
+  # Нулираме флаговете при промяна на графика
+  schedule_config['executed_today_0kw'] = False
+  schedule_config['executed_today_30kw'] = False
+
   return jsonify({'status': 'success', 'message': 'Графикът е запазен'})
+
+
+@app.route('/check-schedule')
+def check_schedule():
+  """Ендпойнт, който се вика на всеки няколко минути от UptimeRobot"""
+  msg = check_and_execute_schedule()
+  return jsonify({'status': 'checked', 'details': msg})
 
 
 if __name__ == '__main__':
