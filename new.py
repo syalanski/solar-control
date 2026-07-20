@@ -1,132 +1,65 @@
-import os
-import time
-from flask import Flask, render_template_string, redirect, url_for
-from playwright.sync_api import sync_playwright
+from flask import Flask, render_template, jsonify
+import requests
+import json
 
 app = Flask(__name__)
 
-# ========================= ХУАВЕЙ БОТ НАСТРОЙКИ =========================
-HUAWEI_WEB_URL = "https://eu5.fusionsolar.huawei.com/"
-HUAWEI_USER = "Stako123"
-HUAWEI_PASS = "PV123456"
+# Функция, която изпраща директната API заявка към FusionSolar
+def send_fusionsolar_power_limit(limit_value):
+    url = "https://uni003eu5.fusionsolar.huawei.com/rest/neteco/config/device/v1/config/power-control"
 
-# Взема ключа от Render Еnvironment, а ако липсва, ползва твоя резервен
-BROWSERLESS_KEY = os.environ.get("BROWSERLESS_API_KEY", "2UuicgioM5cEOSk25ba146bf2191a9cb647fb81295bacff9f")
-# =======================================================================
+    # Данните, които FusionSolar очаква за ФТВ Сливен
+    payload = {
+        'dn': 'NE=135329489',
+        'changeValues': json.dumps([{"id": "21003", "value": limit_value}])
+    }
 
-status_db = {
-    "sliven": {"limit": "100%", "schedule": "Няма", "last_action": "Няма"}
-}
+    # Всички хедъри и валидни бисквитки от сесията ти
+    headers = {
+        'Accept': 'application/json, text/javascript, */*; q=0.01',
+        'Accept-Language': 'bg-BG,bg;q=0.9,en;q=0.8,de;q=0.7',
+        'Connection': 'keep-alive',
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'DNT': '1',
+        'Origin': 'https://uni003eu5.fusionsolar.huawei.com',
+        'Referer': 'https://uni003eu5.fusionsolar.huawei.com/uniportal/pvmswebsite/assets/build/cloud.html?app-id=smartpvms&instance-id=smartpvms&zone-id=region-3-a9ef73df-f438-448e-9c4e-f6439f1d52fa',
+        'Sec-Fetch-Dest': 'empty',
+        'Sec-Fetch-Mode': 'cors',
+        'Sec-Fetch-Site': 'same-origin',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36',
+        'X-Requested-With': 'XMLHttpRequest',
+        'roarand': 'c-umbt3tbt8abudf469ek9hhg7bw9juqph7xg806kb8bnvuqtc',
+        'sec-ch-ua': '"Not;A=Brand";v="8", "Chromium";v="150", "Google Chrome";v="150"',
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': '"Windows"',
+        'x-non-renewal-session': 'true',
+        'x-timezone-offset': '180',
+        'Cookie': 'JSESSIONID=2067FF3BEF6F4A56EE37EBFE00F00FF3; _abck=82C3C6C60F1F1F52658ACD85E9B48609~-1~YAAQFi0UAtq2yG6aAQAApMX3fA5m4N0fpnwPdPZ8gTwth5RNKhPuPZFTR/IJ2z06RIxx81l9X3COwALNVLVeTli4j1u3x7ahO80oDi75g1ojJ/vgXzUOa1ZlKdUnpE/gFb+1rbuitSn3IBG8IqZ2indUe22Lmwksc/l5wHt058dRT3/In4G2bkMAaoMhImNAY5B3+pBEZjeK7zY6XudzNeguwi7/9aNY2Y8edpjStgZI/CZMPVhPELvr26J7ae+lQY1vrLd82O6nNnxY3JL0FFQL3JeoMCukd/6v+Q2D9sNaOmTZX3PwWazK+SASRd4ANUKa4DpclLZUYlrMRhOchNI9j99JLCLOzTKFhHE8IOcUkKpvUqetUVX4KvknZdnzcPnbr5u8FZsKhoSmbl7fUfYFK2O3mzElS+IbbbOBLlMiPLEO2Z1OH8ZVWjGDvmJYWRRGBZNtTRc=~-1~-1~-1~-1~-1; __hau=SUPPORTE.1769679841.1365012467; locale=bg-bg; selfSettingLanguage=true; SSO_TGC_=TGTX--F1018898895-1244822-Ohd3Jf9tbeUVhHco2S0Awlge5v1VlbZTmNi; x-gray-tag=common; dp-session=x-sbvz847s7sru3xnxrxrv86mldfk57yentdhgg93xnxfsbs88nvnupf2n87rus75c9dvv1ebzuobzvxjtth5gunao6roa3y5chi9gga6lc9vxlc3wqllfrtannu6n0885; HWWAFSESTIME=1784540277913; HWWAFSESID=2ecdc583fc03a57710a; pageversion=0; JSESSIONID=994F6CE07407C4C1A87FDD3325E7BB90'
+    }
 
-HTML_TEMPLATE = """
-<!DOCTYPE html>
-<html lang="bg">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Бот Контрол на Соларни Централи</title>
-    <style>
-        body { font-family: Arial, sans-serif; background-color: #2c3e50; color: white; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box;}
-        h1 { color: #ecf0f1; font-size: 1.5rem; margin-bottom: 20px; }
-        .plants-container { display: flex; flex-direction: column; gap: 20px; width: 100%; max-width: 500px; }
-        .plant-card { background-color: #34495e; padding: 15px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); text-align: center;}
-        .plant-name { font-size: 1.2rem; font-weight: bold; color: #1abc9c; margin-bottom: 10px; }
-        .status { font-size: 0.9rem; color: #bdc3c7; margin-bottom: 15px; }
-        .last-action { font-size: 0.8rem; color: #ecf0f1; margin-top: 10px; font-style: italic; background: #c0392b; padding: 5px; border-radius: 3px; }
-        .btn-group { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; }
-        .btn { padding: 10px 15px; border: none; border-radius: 5px; cursor: pointer; color: white; font-weight: bold; font-size: 0.9rem; text-decoration: none; transition: background-color 0.3s; flex: 1 0 calc(33.33% - 10px); max-width: 100px; text-align: center; }
-        .btn-0 { background-color: #e74c3c; } .btn-0:hover { background-color: #c0392b; }
-        .btn-50 { background-color: #f39c12; } .btn-50:hover { background-color: #d35400; }
-        .btn-100 { background-color: #2ecc71; } .btn-100:hover { background-color: #27ae60; }
-    </style>
-</head>
-<body>
-    <h1>Бот Управление на Производството</h1>
-    <div class="plants-container">
-        <div class="plant-card">
-            <div class="plant-name">ФТВ Сливен</div>
-            <div class="status">Лимит: {{ sliven.limit }} | График: {{ sliven.schedule }}</div>
-            <div class="btn-group">
-                <a href="/limit/sliven/0" class="btn btn-0">0%</a>
-                <a href="/limit/sliven/50" class="btn btn-50">50%</a>
-                <a href="/limit/sliven/100" class="btn btn-100">100%</a>
-            </div>
-            <div class="last-action">{{ sliven.last_action }}</div>
-        </div>
-    </div>
-</body>
-</html>
-"""
+    try:
+        response = requests.post(url, headers=headers, data=payload, timeout=10)
+        # Връща True, ако HTTP статусът е OK (200)
+        return response.status_code == 200, response.text
+    except Exception as e:
+        return False, str(e)
 
-def run_playwright_bot(limit_percent):
-    endpoint_url = "wss://chrome.browserless.io"
-    
-    with sync_playwright() as p:
-        try:
-            print("Свързване с облачния браузър...")
-            # Подаване на връзката по правилния начин за Playwright с токена
-            browser = p.chromium.connect_over_cdp(
-                f"{endpoint_url}?token={BROWSERLESS_KEY}"
-            )
-            page = browser.new_page()
-            
-            print("Отваряне на FusionSolar...")
-            page.goto(HUAWEI_WEB_URL)
-            
-            print("Попълване на данните за вход...")
-            page.wait_for_selector("input[type='text'], #userid")
-            page.fill("input[type='text'], #userid", HUAWEI_USER)
-            page.fill("input[type='password'], #password", HUAWEI_PASS)
-            
-            print("Кликване на бутона Вход...")
-            page.click("button, #btnLogin")
-            page.wait_for_timeout(6000)
-            
-            print("Навигиране в дървовидната структура вляво...")
-            # 1. Отваряне на централата
-            page.click("text=А ФТВ - Сливен - 6 стринга")
-            page.wait_for_timeout(2000)
-            
-            # 2. Кликване върху устройството
-            page.click("text=1019C0098389")
-            page.wait_for_timeout(3000)
-            
-            # 3. Управление на устройството
-            print("Кликване на 'Управление на устройството'...")
-            page.click("text=Управление на устройството")
-            page.wait_for_timeout(3000)
-            
-            # 4. Регулиране на активната мощност
-            print("Отваряне на менюто за регулиране на активната мощност...")
-            page.click("text=Регулиране на активната мощност")
-            page.wait_for_timeout(4000)
-            
-            print(f"Успешно отваряне на настройките! Задаване на лимит: {limit_percent}%")
-            
-            browser.close()
-            return True, "Успешно отворено меню за регулиране"
-            
-        except Exception as e:
-            return False, f"Грешка: {str(e)}"
-
+# Главен път за зареждане на страницата
 @app.route('/')
 def index():
-    return render_template_string(HTML_TEMPLATE, sliven=status_db["sliven"])
+    return render_template('index.html')  # или както ти се казва HTML файла
 
-@app.route('/limit/<plant_key>/<limit>')
-def change_limit(plant_key, limit):
-    status_db[plant_key]["last_action"] = "Ботът работи в момента..."
-    success, message = run_playwright_bot(limit)
+# Маршрут за промяна на лимита от бутоните
+@app.route('/limit/<location>/<int:percent>')
+def set_limit(location, percent):
+    if percent in [0, 50, 100]:
+        success, res_text = send_fusionsolar_power_limit(percent)
+        if success:
+            return jsonify({"status": "success", "message": f"Лимитът е променен на {percent}%"}), 200
+        else:
+            return jsonify({"status": "error", "message": res_text}), 500
     
-    if success:
-        status_db[plant_key]["limit"] = f"{limit}%"
-        status_db[plant_key]["schedule"] = "Ръчно (Бот)"
-        status_db[plant_key]["last_action"] = f"Последно: Успех в {time.strftime('%H:%M:%S')}"
-    else:
-        status_db[plant_key]["last_action"] = f"Грешка: {message}"
-        
-    return redirect(url_for('index'))
+    return jsonify({"status": "error", "message": "Невалиден процент"}), 400
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=10000)
