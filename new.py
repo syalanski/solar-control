@@ -1,20 +1,20 @@
 from datetime import datetime
 import json
 import os
-import requests
 from flask import Flask, jsonify, request
 import pytz
+import requests
 
 app = Flask(__name__)
 
 bg_tz = pytz.timezone('Europe/Sofia')
 
-# Конфигурация за OpenAPI
-OPENAPI_HOST = "https://eu5.fusionsolar.huawei.com"
+# Конфигурация за OpenAPI (правилният хост за твоя клъстер)
+OPENAPI_HOST = 'https://uni003eu5.fusionsolar.huawei.com'
 SYSTEM_CODE = os.environ.get('FUSIONSOLAR_USER', 'Proba_Bot')
 SECRET_KEY = os.environ.get('FUSIONSOLAR_PASS', 'Lamer1234')
 
-# Конфигурация за централите (ползват се devId / plantCode според OpenAPI)
+# Конфигурация за централите
 PLANTS = {
     'sliven': {
         'name': 'ФТВ Сливен',
@@ -45,116 +45,117 @@ PLANTS = {
 }
 
 
-OPENAPI_HOST = "https://uni003eu5.fusionsolar.huawei.com"
-
-
 def get_openapi_token():
   """Влизане през официалния Northbound API интерфейс (/thirdData/login)"""
-  url = f"{OPENAPI_HOST}/thirdData/login"
+  url = f'{OPENAPI_HOST}/thirdData/login'
 
-  payload = {"userName": SYSTEM_CODE, "systemCode": SECRET_KEY}
+  payload = {'userName': SYSTEM_CODE, 'systemCode': SECRET_KEY}
 
-  headers = {"Content-Type": "application/json"}
+  headers = {'Content-Type': 'application/json'}
 
   try:
     response = requests.post(url, json=payload, headers=headers, timeout=15)
-    print(f"[OPENAPI LOGIN CODE] {response.status_code}")
+    print(f'[OPENAPI LOGIN CODE] {response.status_code}')
 
     if response.status_code == 200:
       data = response.json()
-      # В Northbound API токенът или сесията идва в XSFR-TOKEN header или в JSON отговора
-      token = response.headers.get("XSRF-TOKEN") or data.get("data")
+      token = response.headers.get('XSRF-TOKEN') or data.get('data')
       print(
-          f"[OPENAPI LOGIN SUCCESS] Успешен вход! Отговор: {response.text[:100]}"
+          f'[OPENAPI LOGIN SUCCESS] Успешен вход! Отговор: {response.text[:100]}'
       )
       return token
     else:
-      print(f"[OPENAPI LOGIN FAIL] Грешка {response.status_code}: {response.text}")
+      print(
+          f'[OPENAPI LOGIN FAIL] Грешка {response.status_code}: {response.text}'
+      )
       return None
   except Exception as e:
-    print(f"[OPENAPI EXCEPTION] {str(e)}")
+    print(f'[OPENAPI EXCEPTION] {str(e)}')
     return None
 
 
-
 def send_fusionsolar_power_limit_kw(dn_value, kw_value):
-    token = get_openapi_token()
-    
-    if not token:
-        return False, "Грешка при OpenAPI вход (провери потребител/парола)"
+  token = get_openapi_token()
 
-    url = f"{OPENAPI_HOST}/thirdparty/config/device/power-control"
-    
-    payload = {
-        "devType": "INVERTER",
-        "dn": dn_value,
-        "controls": [
-            {"id": "21003", "value": str(kw_value)}
-        ]
-    }
-    
-    headers = {
-        "Content-Type": "application/json",
-        "XSRF-TOKEN": token
-    }
-    
-    try:
-        response = requests.post(url, json=payload, headers=headers, timeout=15)
-        if response.status_code == 200:
-            return True, "Успешно зададен лимит през OpenAPI"
-        else:
-            return False, f"Грешка {response.status_code}: {response.text}"
-    except Exception as e:
-        return False, str(e)
+  if not token:
+    return False, 'Грешка при OpenAPI вход (провери потребител/парола)'
+
+  # Използваме /thirdData/ вместо /thirdparty/
+  url = f'{OPENAPI_HOST}/thirdData/config/device/power-control'
+
+  payload = {
+      'devType': 'INVERTER',
+      'dn': dn_value,
+      'controls': [{'id': '21003', 'value': str(kw_value)}],
+  }
+
+  headers = {'Content-Type': 'application/json', 'XSRF-TOKEN': token}
+
+  try:
+    response = requests.post(url, json=payload, headers=headers, timeout=15)
+    if response.status_code == 200:
+      return True, 'Успешно зададен лимит през OpenAPI'
+    else:
+      return False, f'Грешка {response.status_code}: {response.text}'
+  except Exception as e:
+    return False, str(e)
 
 
 def check_and_execute_schedules():
-    now_bg = datetime.now(bg_tz)
-    current_time_str = now_bg.strftime('%H:%M')
-    now_minutes = now_bg.hour * 60 + now_bg.minute
-    messages = []
+  now_bg = datetime.now(bg_tz)
+  current_time_str = now_bg.strftime('%H:%M')
+  now_minutes = now_bg.hour * 60 + now_bg.minute
+  messages = []
 
-    for plant_id, plant in PLANTS.items():
-        sched = plant['schedule']
-        if not sched['enabled']:
-            continue
+  for plant_id, plant in PLANTS.items():
+    sched = plant['schedule']
+    if not sched['enabled']:
+      continue
 
-        h0, m0 = map(int, sched['time_off'].split(':'))
-        target_off = h0 * 60 + m0
+    h0, m0 = map(int, sched['time_off'].split(':'))
+    target_off = h0 * 60 + m0
 
-        h_max, m_max = map(int, sched['time_on'].split(':'))
-        target_on = h_max * 60 + m_max
+    h_max, m_max = map(int, sched['time_on'].split(':'))
+    target_on = h_max * 60 + m_max
 
-        if now_minutes >= target_off and now_minutes < target_on and not sched['executed_today_off']:
-            success, res = send_fusionsolar_power_limit_kw(plant['dn'], 0)
-            sched['executed_today_off'] = True
-            status = "Успешно (0 kW)" if success else f"Грешка: {res}"
-            sched['last_action'] = f"Автоматично в {current_time_str}: {status}"
-            messages.append(f"{plant['name']}: {status}")
+    if (
+        now_minutes >= target_off
+        and now_minutes < target_on
+        and not sched['executed_today_off']
+    ):
+      success, res = send_fusionsolar_power_limit_kw(plant['dn'], 0)
+      sched['executed_today_off'] = True
+      status = 'Успешно (0 kW)' if success else f'Грешка: {res}'
+      sched['last_action'] = f'Автоматично в {current_time_str}: {status}'
+      messages.append(f"{plant['name']}: {status}")
 
-        elif now_minutes >= target_on and not sched['executed_today_on']:
-            max_kw = plant['max_kw']
-            success, res = send_fusionsolar_power_limit_kw(plant['dn'], max_kw)
-            sched['executed_today_on'] = True
-            status = f"Успешно ({max_kw} kW)" if success else f"Грешка: {res}"
-            sched['last_action'] = f"Автоматично в {current_time_str}: {status}"
-            messages.append(f"{plant['name']}: {status}")
+    elif now_minutes >= target_on and not sched['executed_today_on']:
+      max_kw = plant['max_kw']
+      success, res = send_fusionsolar_power_limit_kw(plant['dn'], max_kw)
+      sched['executed_today_on'] = True
+      status = f'Успешно ({max_kw} kW)' if success else f'Грешка: {res}'
+      sched['last_action'] = f'Автоматично в {current_time_str}: {status}'
+      messages.append(f"{plant['name']}: {status}")
 
-        if current_time_str == "00:00":
-            sched['executed_today_off'] = False
-            sched['executed_today_on'] = False
+    if current_time_str == '00:00':
+      sched['executed_today_off'] = False
+      sched['executed_today_on'] = False
 
-    return "; ".join(messages) if messages else f"Проверка в {current_time_str}: Няма задачи"
+  return (
+      '; '.join(messages)
+      if messages
+      else f'Проверка в {current_time_str}: Няма задачи'
+  )
 
 
 @app.route('/')
 def index():
-    cards_html = ""
-    for plant_id, plant in PLANTS.items():
-        sched = plant['schedule']
-        max_kw = plant['max_kw']
-        
-        cards_html += f"""
+  cards_html = ''
+  for plant_id, plant in PLANTS.items():
+    sched = plant['schedule']
+    max_kw = plant['max_kw']
+
+    cards_html += f"""
         <div class="card">
             <h2>{plant['name']}</h2>
             
@@ -196,7 +197,7 @@ def index():
         </div>
         """
 
-    return f"""
+  return f"""
     <!DOCTYPE html>
     <html lang="bg">
     <head>
@@ -267,39 +268,48 @@ def index():
 
 @app.route('/limit/<plant_id>/<int:kw>')
 def set_limit(plant_id, kw):
-    if plant_id in PLANTS:
-        max_kw = PLANTS[plant_id]['max_kw']
-        if kw in [0, max_kw]:
-            dn = PLANTS[plant_id]['dn']
-            success, res_text = send_fusionsolar_power_limit_kw(dn, kw)
-            if success:
-                return jsonify({'status': 'success', 'message': f'Лимитът за {PLANTS[plant_id]["name"]} е зададен на {kw} kW'}), 200
-            else:
-                return jsonify({'status': 'error', 'message': res_text}), 500
-    return jsonify({'status': 'error', 'message': 'Невалидни параметри'}), 400
+  if plant_id in PLANTS:
+    max_kw = PLANTS[plant_id]['max_kw']
+    if kw in [0, max_kw]:
+      dn = PLANTS[plant_id]['dn']
+      success, res_text = send_fusionsolar_power_limit_kw(dn, kw)
+      if success:
+        return (
+            jsonify({
+                'status': 'success',
+                'message': (
+                    f'Лимитът за {PLANTS[plant_id]["name"]} е зададен на'
+                    f' {kw} kW'
+                ),
+            }),
+            200,
+        )
+      else:
+        return jsonify({'status': 'error', 'message': res_text}), 500
+  return jsonify({'status': 'error', 'message': 'Невалидни параметри'}), 400
 
 
 @app.route('/set-schedule/<plant_id>', methods=['POST'])
 def set_schedule(plant_id):
-    if plant_id in PLANTS:
-        data = request.json
-        sched = PLANTS[plant_id]['schedule']
-        sched['enabled'] = data.get('enabled', False)
-        sched['time_off'] = data.get('time_off', '')
-        sched['time_on'] = data.get('time_on', '')
-        
-        sched['executed_today_off'] = False
-        sched['executed_today_on'] = False
-        
-        return jsonify({'status': 'success', 'message': 'Графикът е запазен'})
-    return jsonify({'status': 'error', 'message': 'Несъществуваща централа'}), 400
+  if plant_id in PLANTS:
+    data = request.json
+    sched = PLANTS[plant_id]['schedule']
+    sched['enabled'] = data.get('enabled', False)
+    sched['time_off'] = data.get('time_off', '')
+    sched['time_on'] = data.get('time_on', '')
+
+    sched['executed_today_off'] = False
+    sched['executed_today_on'] = False
+
+    return jsonify({'status': 'success', 'message': 'Графикът е запазен'})
+  return jsonify({'status': 'error', 'message': 'Несъществуваща централа'}), 400
 
 
 @app.route('/check-schedule')
 def check_schedule():
-    msg = check_and_execute_schedules()
-    return jsonify({'status': 'checked', 'details': msg})
+  msg = check_and_execute_schedules()
+  return jsonify({'status': 'checked', 'details': msg})
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=10000)
+  app.run(host='0.0.0.0', port=10000)
