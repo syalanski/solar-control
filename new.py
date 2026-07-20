@@ -1,5 +1,5 @@
-import json
 from datetime import datetime
+import os
 from flask import Flask, jsonify, request
 import pytz
 import requests
@@ -38,57 +38,80 @@ PLANTS = {
     },
 }
 
+# Извличаме акаунта от настройките на Render (Environment Variables)
+FUSIONSOLAR_USER = os.environ.get('FUSIONSOLAR_USER', '')
+FUSIONSOLAR_PASS = os.environ.get('FUSIONSOLAR_PASS', '')
+
+
+def get_authenticated_session():
+  """Автоматично влиза във FusionSolar и връща активна сесия с нови бисквитки"""
+  session = requests.Session()
+  login_url = 'https://uni003eu5.fusionsolar.huawei.com/rest/pvms/web/security/v1/login'
+
+  headers = {
+      'Accept': 'application/json, text/javascript, */*; q=0.01',
+      'Content-Type': 'application/json;charset=UTF-8',
+      'User-Agent': (
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,'
+          ' like Gecko) Chrome/150.0.0.0 Safari/537.36'
+      ),
+  }
+
+  payload = {'userName': FUSIONSOLAR_USER, 'value': FUSIONSOLAR_PASS}
+
+  try:
+    response = session.post(
+        login_url, json=payload, headers=headers, timeout=10
+    )
+    if response.status_code == 200:
+      data = response.json()
+      if data.get('data', {}).get('curUser'):
+        # Успешен логин! Сесията вече съдържа новите бисквитки
+        return session
+  except Exception as e:
+    print(f'[LOGIN ERROR] {str(e)}')
+
+  return None
+
 
 def send_fusionsolar_power_limit_kw(dn_value, kw_value):
+  """Изпраща команда за ограничение, ползвайки свежа сесия"""
+  session = get_authenticated_session()
+  if not session:
+    return False, 'Грешка при автоматичния вход във FusionSolar!'
+
   url = 'https://uni003eu5.fusionsolar.huawei.com/rest/neteco/config/device/v1/config/power-control'
 
   payload = {
       'dn': dn_value,
-      'changeValues': json.dumps([{'id': '21003', 'value': kw_value}]),
+      'changeValues': f'[{{"id":"21003","value":{kw_value}}}]',
   }
+
+  # Извличаме roarand от бисквитките, ако го има
+  roarand = session.cookies.get('roarand', '')
 
   headers = {
       'Accept': 'application/json, text/javascript, */*; q=0.01',
-      'Accept-Language': 'bg-BG,bg;q=0.9,en;q=0.8,de;q=0.7',
-      'Connection': 'keep-alive',
       'Content-Type': 'application/x-www-form-urlencoded',
-      'DNT': '1',
       'Origin': 'https://uni003eu5.fusionsolar.huawei.com',
       'Referer': (
-          'https://uni003eu5.fusionsolar.huawei.com/uniportal/pvmswebsite/assets/build/cloud.html?app-id=smartpvms&instance-id=smartpvms&zone-id=region-3-a9ef73df-f438-448e-9c4e-f6439f1d52fa'
+          'https://uni003eu5.fusionsolar.huawei.com/uniportal/pvmswebsite/assets/build/cloud.html'
       ),
-      'Sec-Fetch-Dest': 'empty',
-      'Sec-Fetch-Mode': 'cors',
-      'Sec-Fetch-Site': 'same-origin',
       'User-Agent': (
           'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,'
           ' like Gecko) Chrome/150.0.0.0 Safari/537.36'
       ),
       'X-Requested-With': 'XMLHttpRequest',
-      'roarand': 'c-umbt3tbt8abudf469ek9hhg7bw9juqph7xg806kb8bnvuqtc',
-      'sec-ch-ua': (
-          '"Not;A=Brand";v="8", "Chromium";v="150", "Google Chrome";v="150"'
-      ),
-      'sec-ch-ua-mobile': '?0',
-      'sec-ch-ua-platform': '"Windows"',
-      'x-non-renewal-session': 'true',
-      'x-timezone-offset': '180',
-      'Cookie': (
-          'JSESSIONID=2067FF3BEF6F4A56EE37EBFE00F00FF3;'
-          ' _abck=82C3C6C60F1F1F52658ACD85E9B48609~-1~YAAQFi0UAtq2yG6aAQAApMX3fA5m4N0fpnwPdPZ8gTwth5RNKhPuPZFTR/IJ2z06RIxx81l9X3COwALNVLVeTli4j1u3x7ahO80oDi75g1ojJ/vgXzUOa1ZlKdUnpE/gFb+1rbuitSn3IBG8IqZ2indUe22Lmwksc/l5wHt058dRT3/In4G2bkMAaoMhImNAY5B3+pBEZjeK7zY6XudzNeguwi7/9aNY2Y8edpjStgZI/CZMPVhPELvr26J7ae+lQY1vrLd82O6nNnxY3JL0FFQL3JeoMCukd/6v+Q2D9sNaOmTZX3PwWazK+SASRd4ANUKa4DpclLZUYlrMRhOchNI9j99JLCLOzTKFhHE8IOcUkKpvUqetUVX4KvknZdnzcPnbr5u8FZsKhoSmbl7fUfYFK2O3mzElS+IbbbOBLlMiPLEO2Z1OH8ZVWjGDvmJYWRRGBZNtTRc=~-1~-1~-1~-1~-1;'
-          ' __hau=SUPPORTE.1769679841.1365012467; locale=bg-bg;'
-          ' selfSettingLanguage=true;'
-          ' SSO_TGC_=TGTX--F1018898895-1244822-Ohd3Jf9tbeUVhHco2S0Awlge5v1VlbZTmNi;'
-          ' x-gray-tag=common;'
-          ' dp-session=x-sbvz847s7sru3xnxrxrv86mldfk57yentdhgg93xnxfsbs88nvnupf2n87rus75c9dvv1ebzuobzvxjtth5gunao6roa3y5chi9gga6lc9vxlc3wqllfrtannu6n0885;'
-          ' HWWAFSESTIME=1784540277913; HWWAFSESID=2ecdc583fc03a57710a;'
-          ' pageversion=0; JSESSIONID=994F6CE07407C4C1A87FDD3325E7BB90'
-      ),
+      'roarand': roarand,
   }
 
   try:
-    response = requests.post(url, headers=headers, data=payload, timeout=10)
-    return response.status_code == 200, response.text
+    response = session.post(url, headers=headers, data=payload, timeout=10)
+    res_data = response.json()
+    if response.status_code == 200 and res_data.get('failCode') == 0:
+      return True, 'Успешно зададен лимит'
+    else:
+      return False, f'Грешка от Huawei: {response.text}'
   except Exception as e:
     return False, str(e)
 
@@ -122,7 +145,7 @@ def check_and_execute_schedules():
       sched['last_action'] = f'Автоматично в {current_time_str}: {status}'
       messages.append(f"{plant['name']}: {status}")
 
-    # Проверка за MAX kW (30kW за Сливен / 90kW за Петро)
+    # Проверка за MAX kW
     elif now_minutes >= target_on and not sched['executed_today_on']:
       max_kw = plant['max_kw']
       success, res = send_fusionsolar_power_limit_kw(plant['dn'], max_kw)
@@ -278,7 +301,7 @@ def set_limit(plant_id, kw):
                 ),
             }),
             200,
-      )
+        )
       else:
         return jsonify({'status': 'error', 'message': res_text}), 500
   return jsonify({'status': 'error', 'message': 'Невалидни параметри'}), 400
