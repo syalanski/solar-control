@@ -70,47 +70,62 @@ def send_fusionsolar_power_limit_kw(kw_value):
     return response.status_code == 200, response.text
   except Exception as e:
     return False, str(e)
-
-
+      
 def check_and_execute_schedule():
-  """Проверява дали текущото BG време съвпада с графика"""
+  """Проверява дали текущото BG време е преминало заложения час"""
   if not schedule_config['enabled']:
     return 'Графикът е изключен'
 
   now_bg = datetime.now(bg_tz)
-  current_time = now_bg.strftime('%H:%M')
+  current_time_str = now_bg.strftime('%H:%M')
 
-  result_msg = f'Проверка в {current_time}: Няма активни задачи'
+  # Превръщаме текущото време и заложените часове в минути за лесно сравнение
+  now_minutes = now_bg.hour * 60 + now_bg.minute
 
-  # Проверка за 0 kW
+  # По подразбиране задаваме 0 kW / 30 kW часовете
+  h0, m0 = map(int, schedule_config['time_0kw'].split(':'))
+  target_0kw_minutes = h0 * 60 + m0
+
+  h30, m30 = map(int, schedule_config['time_30kw'].split(':'))
+  target_30kw_minutes = h30 * 60 + m30
+
+  result_msg = f'Проверка в {current_time_str}: Изчаква се зададен час'
+
+  # 1. Проверка за 0 kW: ако текущите минути са >= заложените и ДНЕС още НЕ е изпълнено
   if (
-      current_time == schedule_config['time_0kw']
+      now_minutes >= target_0kw_minutes
+      and now_minutes < target_30kw_minutes
       and not schedule_config['executed_today_0kw']
   ):
     success, res = send_fusionsolar_power_limit_kw(0)
     schedule_config['executed_today_0kw'] = True
     status = 'Успешно (0 kW)' if success else f'Грешка: {res}'
-    schedule_config['last_action'] = f'Автоматично в {current_time}: {status}'
+    schedule_config['last_action'] = (
+        f'Автоматично в {current_time_str}: {status}'
+    )
     result_msg = schedule_config['last_action']
+    print(f'[SCHEDULE EXECUTE] {result_msg}')
 
-  # Проверка за 30 kW
+  # 2. Проверка за 30 kW: ако текущите минути са >= заложените и ДНЕС още НЕ е изпълнено
   elif (
-      current_time == schedule_config['time_30kw']
+      now_minutes >= target_30kw_minutes
       and not schedule_config['executed_today_30kw']
   ):
     success, res = send_fusionsolar_power_limit_kw(30)
     schedule_config['executed_today_30kw'] = True
     status = 'Успешно (30 kW)' if success else f'Грешка: {res}'
-    schedule_config['last_action'] = f'Автоматично в {current_time}: {status}'
+    schedule_config['last_action'] = (
+        f'Автоматично в {current_time_str}: {status}'
+    )
     result_msg = schedule_config['last_action']
+    print(f'[SCHEDULE EXECUTE] {result_msg}')
 
-  # Нулиране на флаговете за новия ден в полунощ
-  if current_time == '00:00':
+  # Нулиране на флаговете нощем (след 00:00)
+  if current_time_str == '00:00':
     schedule_config['executed_today_0kw'] = False
     schedule_config['executed_today_30kw'] = False
 
   return result_msg
-
 
 @app.route('/')
 def index():
