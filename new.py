@@ -9,7 +9,7 @@ app = Flask(__name__)
 
 bg_tz = pytz.timezone('Europe/Sofia')
 
-# Конфигурация за OpenAPI (правилният хост за твоя клъстер)
+# Конфигурация за OpenAPI (точен хост за твоя клъстер)
 OPENAPI_HOST = 'https://uni003eu5.fusionsolar.huawei.com'
 SYSTEM_CODE = os.environ.get('FUSIONSOLAR_USER', 'Proba_Bot')
 SECRET_KEY = os.environ.get('FUSIONSOLAR_PASS', 'Lamer1234')
@@ -46,11 +46,9 @@ PLANTS = {
 
 
 def get_openapi_token():
-  """Влизане през официалния Northbound API интерфейс (/thirdData/login)"""
+  """Влизане през Northbound API (/thirdData/login) с безопасна проверка за токена"""
   url = f'{OPENAPI_HOST}/thirdData/login'
-
   payload = {'userName': SYSTEM_CODE, 'systemCode': SECRET_KEY}
-
   headers = {'Content-Type': 'application/json'}
 
   try:
@@ -58,11 +56,27 @@ def get_openapi_token():
     print(f'[OPENAPI LOGIN CODE] {response.status_code}')
 
     if response.status_code == 200:
-      data = response.json()
-      token = response.headers.get('XSRF-TOKEN') or data.get('data')
-      print(
-          f'[OPENAPI LOGIN SUCCESS] Успешен вход! Отговор: {response.text[:100]}'
+      # Извличаме токена от header или бисквитките (cookies)
+      token = (
+          response.headers.get('XSRF-TOKEN')
+          or response.cookies.get('XSRF-TOKEN')
+          or response.headers.get('xsrf-token')
       )
+
+      # Ако все пак отговорът е JSON и съдържа токена в бодито:
+      if not token:
+        try:
+          data = response.json()
+          token = (
+              data.get('data')
+              or data.get('xsrfToken')
+              or data.get('params', {}).get('token')
+          )
+        except Exception:
+          pass
+
+      token_preview = token[:15] if token else 'Няма токен в XSRF'
+      print(f'[OPENAPI LOGIN SUCCESS] Взети хедъри/токен: {token_preview}')
       return token
     else:
       print(
@@ -80,7 +94,6 @@ def send_fusionsolar_power_limit_kw(dn_value, kw_value):
   if not token:
     return False, 'Грешка при OpenAPI вход (провери потребител/парола)'
 
-  # Използваме /thirdData/ вместо /thirdparty/
   url = f'{OPENAPI_HOST}/thirdData/config/device/power-control'
 
   payload = {
