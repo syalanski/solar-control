@@ -1,7 +1,7 @@
 from datetime import datetime
 import json
 import os
-from curl_cffi import requests
+import requests
 from flask import Flask, jsonify, request
 import pytz
 
@@ -9,7 +9,12 @@ app = Flask(__name__)
 
 bg_tz = pytz.timezone('Europe/Sofia')
 
-# Конфигурация за централите
+# Конфигурация за OpenAPI
+OPENAPI_HOST = "https://eu5.fusionsolar.huawei.com"
+SYSTEM_CODE = os.environ.get('FUSIONSOLAR_USER', 'Proba_Bot')
+SECRET_KEY = os.environ.get('FUSIONSOLAR_PASS', 'Lamer1234')
+
+# Конфигурация за централите (ползват се devId / plantCode според OpenAPI)
 PLANTS = {
     'sliven': {
         'name': 'ФТВ Сливен',
@@ -40,138 +45,113 @@ PLANTS = {
 }
 
 
-def get_authenticated_session():
-  """Автоматичен вход във FusionSolar с имитация на истински Chrome"""
-  session = requests.Session(impersonate='chrome120')
-
-  login_url = 'https://uni003eu5.fusionsolar.huawei.com/rest/pvms/web/security/v1/login'
-
-  headers = {
-      'Accept': 'application/json, text/javascript, */*; q=0.01',
-      'Content-Type': 'application/json;charset=UTF-8',
-      'Origin': 'https://uni003eu5.fusionsolar.huawei.com',
-      'Referer': (
-          'https://uni003eu5.fusionsolar.huawei.com/uniportal/pvmswebsite/assets/build/cloud.html'
-      ),
-      'X-Requested-With': 'XMLHttpRequest',
-  }
-
-  payload = {
-      'userName': os.environ.get('FUSIONSOLAR_USER', ''),
-      'value': os.environ.get('FUSIONSOLAR_PASS', ''),
-  }
-
-  try:
-    response = session.post(
-        login_url, json=payload, headers=headers, timeout=15
-    )
-    print(f'[AUTO-LOGIN CODE] {response.status_code}')
-
-    if response.status_code == 200:
-      data = response.json()
-      if data.get('data', {}).get('curUser'):
-        print('[AUTO-LOGIN SUCCESS] Успешен автоматичен вход!')
-        return session
-      else:
-        print(f'[AUTO-LOGIN FAIL] Отговор от системата: {response.text}')
-  except Exception as e:
-    print(f'[AUTO-LOGIN EXCEPTION] {str(e)}')
-
-  return None
+def get_openapi_token():
+    """Влизане през официалния Northbound OpenAPI интерфейс"""
+    url = f"{OPENAPI_HOST}/thirdparty/login"
+    payload = {
+        "systemCode": SYSTEM_CODE,
+        "secretKey": SECRET_KEY
+    }
+    headers = {
+        "Content-Type": "application/json"
+    }
+    
+    try:
+        response = requests.post(url, json=payload, headers=headers, timeout=15)
+        print(f"[OPENAPI LOGIN CODE] {response.status_code}")
+        
+        # Токенът обикновено се връща в заглавната част (Headers)
+        token = response.headers.get("XSRF-TOKEN")
+        
+        if response.status_code == 200 and token:
+            print("[OPENAPI LOGIN SUCCESS] Успешно вземане на API токен!")
+            return token
+        else:
+            print(f"[OPENAPI LOGIN FAIL] Отговор: {response.text}")
+            return None
+    except Exception as e:
+        print(f"[OPENAPI EXCEPTION] {str(e)}")
+        return None
 
 
 def send_fusionsolar_power_limit_kw(dn_value, kw_value):
-  session = get_authenticated_session()
+    token = get_openapi_token()
+    
+    if not token:
+        return False, "Грешка при OpenAPI вход (провери потребител/парола)"
 
-  if not session:
-    return (
-        False,
-        'Грешка при автоматичния вход (провери потребител/парола в Render)',
-    )
-
-  url = 'https://uni003eu5.fusionsolar.huawei.com/rest/neteco/config/device/v1/config/power-control'
-
-  payload = {
-      'dn': dn_value,
-      'changeValues': json.dumps([{'id': '21003', 'value': kw_value}]),
-  }
-
-  headers = {
-      'Accept': 'application/json, text/javascript, */*; q=0.01',
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'Origin': 'https://uni003eu5.fusionsolar.huawei.com',
-      'Referer': (
-          'https://uni003eu5.fusionsolar.huawei.com/uniportal/pvmswebsite/assets/build/cloud.html'
-      ),
-      'X-Requested-With': 'XMLHttpRequest',
-  }
-
-  try:
-    response = session.post(url, headers=headers, data=payload, timeout=15)
-    if response.status_code == 200:
-      return True, 'Успешно зададен лимит'
-    else:
-      return False, f'Грешка {response.status_code}: {response.text}'
-  except Exception as e:
-    return False, str(e)
+    url = f"{OPENAPI_HOST}/thirdparty/config/device/power-control"
+    
+    payload = {
+        "devType": "INVERTER",
+        "dn": dn_value,
+        "controls": [
+            {"id": "21003", "value": str(kw_value)}
+        ]
+    }
+    
+    headers = {
+        "Content-Type": "application/json",
+        "XSRF-TOKEN": token
+    }
+    
+    try:
+        response = requests.post(url, json=payload, headers=headers, timeout=15)
+        if response.status_code == 200:
+            return True, "Успешно зададен лимит през OpenAPI"
+        else:
+            return False, f"Грешка {response.status_code}: {response.text}"
+    except Exception as e:
+        return False, str(e)
 
 
 def check_and_execute_schedules():
-  now_bg = datetime.now(bg_tz)
-  current_time_str = now_bg.strftime('%H:%M')
-  now_minutes = now_bg.hour * 60 + now_bg.minute
-  messages = []
+    now_bg = datetime.now(bg_tz)
+    current_time_str = now_bg.strftime('%H:%M')
+    now_minutes = now_bg.hour * 60 + now_bg.minute
+    messages = []
 
-  for plant_id, plant in PLANTS.items():
-    sched = plant['schedule']
-    if not sched['enabled']:
-      continue
+    for plant_id, plant in PLANTS.items():
+        sched = plant['schedule']
+        if not sched['enabled']:
+            continue
 
-    h0, m0 = map(int, sched['time_off'].split(':'))
-    target_off = h0 * 60 + m0
+        h0, m0 = map(int, sched['time_off'].split(':'))
+        target_off = h0 * 60 + m0
 
-    h_max, m_max = map(int, sched['time_on'].split(':'))
-    target_on = h_max * 60 + m_max
+        h_max, m_max = map(int, sched['time_on'].split(':'))
+        target_on = h_max * 60 + m_max
 
-    if (
-        now_minutes >= target_off
-        and now_minutes < target_on
-        and not sched['executed_today_off']
-    ):
-      success, res = send_fusionsolar_power_limit_kw(plant['dn'], 0)
-      sched['executed_today_off'] = True
-      status = 'Успешно (0 kW)' if success else f'Грешка: {res}'
-      sched['last_action'] = f'Автоматично в {current_time_str}: {status}'
-      messages.append(f"{plant['name']}: {status}")
+        if now_minutes >= target_off and now_minutes < target_on and not sched['executed_today_off']:
+            success, res = send_fusionsolar_power_limit_kw(plant['dn'], 0)
+            sched['executed_today_off'] = True
+            status = "Успешно (0 kW)" if success else f"Грешка: {res}"
+            sched['last_action'] = f"Автоматично в {current_time_str}: {status}"
+            messages.append(f"{plant['name']}: {status}")
 
-    elif now_minutes >= target_on and not sched['executed_today_on']:
-      max_kw = plant['max_kw']
-      success, res = send_fusionsolar_power_limit_kw(plant['dn'], max_kw)
-      sched['executed_today_on'] = True
-      status = f'Успешно ({max_kw} kW)' if success else f'Грешка: {res}'
-      sched['last_action'] = f'Автоматично в {current_time_str}: {status}'
-      messages.append(f"{plant['name']}: {status}")
+        elif now_minutes >= target_on and not sched['executed_today_on']:
+            max_kw = plant['max_kw']
+            success, res = send_fusionsolar_power_limit_kw(plant['dn'], max_kw)
+            sched['executed_today_on'] = True
+            status = f"Успешно ({max_kw} kW)" if success else f"Грешка: {res}"
+            sched['last_action'] = f"Автоматично в {current_time_str}: {status}"
+            messages.append(f"{plant['name']}: {status}")
 
-    if current_time_str == '00:00':
-      sched['executed_today_off'] = False
-      sched['executed_today_on'] = False
+        if current_time_str == "00:00":
+            sched['executed_today_off'] = False
+            sched['executed_today_on'] = False
 
-  return (
-      '; '.join(messages)
-      if messages
-      else f'Проверка в {current_time_str}: Няма задачи'
-  )
+    return "; ".join(messages) if messages else f"Проверка в {current_time_str}: Няма задачи"
 
 
 @app.route('/')
 def index():
-  cards_html = ''
-
-  for plant_id, plant in PLANTS.items():
-    sched = plant['schedule']
-    max_kw = plant['max_kw']
-
-    cards_html += f"""
+    cards_html = ""
+    for plant_id, plant in PLANTS.items():
+        sched = plant['schedule']
+        max_kw = plant['max_kw']
+        
+        cards_html += f"""
         <div class="card">
             <h2>{plant['name']}</h2>
             
@@ -213,13 +193,13 @@ def index():
         </div>
         """
 
-  return f"""
+    return f"""
     <!DOCTYPE html>
     <html lang="bg">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Управление на ФТВ</title>
+        <title>Управление на ФТВ (OpenAPI)</title>
         <style>
             body {{ font-family: sans-serif; text-align: center; background: #1e293b; color: white; padding: 20px; }}
             .container {{ display: flex; flex-wrap: wrap; justify-content: center; gap: 20px; }}
@@ -284,47 +264,39 @@ def index():
 
 @app.route('/limit/<plant_id>/<int:kw>')
 def set_limit(plant_id, kw):
-  if plant_id in PLANTS:
-    max_kw = PLANTS[plant_id]['max_kw']
-    if kw in [0, max_kw]:
-      dn = PLANTS[plant_id]['dn']
-      success, res_text = send_fusionsolar_power_limit_kw(dn, kw)
-      if success:
-        return (
-            jsonify({
-                'status': 'success',
-                'message': (
-                    f'Лимитът за {PLANTS[plant_id]["name"]} е зададен на {kw} kW'
-                ),
-            }),
-            200,
-        )
-      else:
-        return jsonify({'status': 'error', 'message': res_text}), 500
-  return jsonify({'status': 'error', 'message': 'Невалидни параметри'}), 400
+    if plant_id in PLANTS:
+        max_kw = PLANTS[plant_id]['max_kw']
+        if kw in [0, max_kw]:
+            dn = PLANTS[plant_id]['dn']
+            success, res_text = send_fusionsolar_power_limit_kw(dn, kw)
+            if success:
+                return jsonify({'status': 'success', 'message': f'Лимитът за {PLANTS[plant_id]["name"]} е зададен на {kw} kW'}), 200
+            else:
+                return jsonify({'status': 'error', 'message': res_text}), 500
+    return jsonify({'status': 'error', 'message': 'Невалидни параметри'}), 400
 
 
 @app.route('/set-schedule/<plant_id>', methods=['POST'])
 def set_schedule(plant_id):
-  if plant_id in PLANTS:
-    data = request.json
-    sched = PLANTS[plant_id]['schedule']
-    sched['enabled'] = data.get('enabled', False)
-    sched['time_off'] = data.get('time_off', '')
-    sched['time_on'] = data.get('time_on', '')
-
-    sched['executed_today_off'] = False
-    sched['executed_today_on'] = False
-
-    return jsonify({'status': 'success', 'message': 'Графикът е запазен'})
-  return jsonify({'status': 'error', 'message': 'Несъществуваща централа'}), 400
+    if plant_id in PLANTS:
+        data = request.json
+        sched = PLANTS[plant_id]['schedule']
+        sched['enabled'] = data.get('enabled', False)
+        sched['time_off'] = data.get('time_off', '')
+        sched['time_on'] = data.get('time_on', '')
+        
+        sched['executed_today_off'] = False
+        sched['executed_today_on'] = False
+        
+        return jsonify({'status': 'success', 'message': 'Графикът е запазен'})
+    return jsonify({'status': 'error', 'message': 'Несъществуваща централа'}), 400
 
 
 @app.route('/check-schedule')
 def check_schedule():
-  msg = check_and_execute_schedules()
-  return jsonify({'status': 'checked', 'details': msg})
+    msg = check_and_execute_schedules()
+    return jsonify({'status': 'checked', 'details': msg})
 
 
 if __name__ == '__main__':
-  app.run(host='0.0.0.0', port=10000)
+    app.run(host='0.0.0.0', port=10000)
