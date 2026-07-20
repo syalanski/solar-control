@@ -2,7 +2,7 @@ from flask import Flask, jsonify
 import json
 import requests
 
-app = Flask(name)
+app = Flask(__name__)
 
 # Функция за изпращане на лимита в kW към FusionSolar
 def send_fusionsolar_power_limit_kw(kw_value):
