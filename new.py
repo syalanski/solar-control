@@ -1,22 +1,20 @@
-from flask import Flask, render_template, jsonify
-import requests
+from flask import Flask, jsonify
 import json
+import requests
 
-app = Flask(__name__)
+app = Flask(name)
 
-# Функция, която изпраща директната API заявка към FusionSolar
-def send_fusionsolar_power_limit(limit_value):
+# Функция за изпращане на лимита в kW към FusionSolar
+def send_fusionsolar_power_limit_kw(kw_value):
     url = "https://uni003eu5.fusionsolar.huawei.com/rest/neteco/config/device/v1/config/power-control"
 
-    # Данните, които FusionSolar очаква за ФТВ Сливен
     payload = {
         'dn': 'NE=135329489',
-        'changeValues': json.dumps([{"id": "21003", "value": limit_value}])
+        'changeValues': json.dumps([{"id": "21003", "value": kw_value}])
     }
 
-    # Всички хедъри и валидни бисквитки от сесията ти
     headers = {
-        'Accept': 'application/json, text/javascript, */*; q=0.01',
+        'Accept': 'application/json, text/javascript, /; q=0.01',
         'Accept-Language': 'bg-BG,bg;q=0.9,en;q=0.8,de;q=0.7',
         'Connection': 'keep-alive',
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -34,17 +32,15 @@ def send_fusionsolar_power_limit(limit_value):
         'sec-ch-ua-platform': '"Windows"',
         'x-non-renewal-session': 'true',
         'x-timezone-offset': '180',
-        'Cookie': 'JSESSIONID=2067FF3BEF6F4A56EE37EBFE00F00FF3; _abck=82C3C6C60F1F1F52658ACD85E9B48609~-1~YAAQFi0UAtq2yG6aAQAApMX3fA5m4N0fpnwPdPZ8gTwth5RNKhPuPZFTR/IJ2z06RIxx81l9X3COwALNVLVeTli4j1u3x7ahO80oDi75g1ojJ/vgXzUOa1ZlKdUnpE/gFb+1rbuitSn3IBG8IqZ2indUe22Lmwksc/l5wHt058dRT3/In4G2bkMAaoMhImNAY5B3+pBEZjeK7zY6XudzNeguwi7/9aNY2Y8edpjStgZI/CZMPVhPELvr26J7ae+lQY1vrLd82O6nNnxY3JL0FFQL3JeoMCukd/6v+Q2D9sNaOmTZX3PwWazK+SASRd4ANUKa4DpclLZUYlrMRhOchNI9j99JLCLOzTKFhHE8IOcUkKpvUqetUVX4KvknZdnzcPnbr5u8FZsKhoSmbl7fUfYFK2O3mzElS+IbbbOBLlMiPLEO2Z1OH8ZVWjGDvmJYWRRGBZNtTRc=~-1~-1~-1~-1~-1; __hau=SUPPORTE.1769679841.1365012467; locale=bg-bg; selfSettingLanguage=true; SSO_TGC_=TGTX--F1018898895-1244822-Ohd3Jf9tbeUVhHco2S0Awlge5v1VlbZTmNi; x-gray-tag=common; dp-session=x-sbvz847s7sru3xnxrxrv86mldfk57yentdhgg93xnxfsbs88nvnupf2n87rus75c9dvv1ebzuobzvxjtth5gunao6roa3y5chi9gga6lc9vxlc3wqllfrtannu6n0885; HWWAFSESTIME=1784540277913; HWWAFSESID=2ecdc583fc03a57710a; pageversion=0; JSESSIONID=994F6CE07407C4C1A87FDD3325E7BB90'
+        'Cookie': 'JSESSIONID=2067FF3BEF6F4A56EE37EBFE00F00FF3; _abck=82C3C6C60F1F1F52658ACD85E9B48609~-1~YAAQFi0UAtq2yG6aAQAApMX3fA5m4N0fpnwPdPZ8gTwth5RNKhPuPZFTR/IJ2z06RIxx81l9X3COwALNVLVeTli4j1u3x7ahO80oDi75g1ojJ/vgXzUOa1ZlKdUnpE/gFb+1rbuitSn3IBG8IqZ2indUe22Lmwksc/l5wHt058dRT3/In4G2bkMAaoMhImNAY5B3+pBEZjeK7zY6XudzNeguwi7/9aNY2Y8edpjStgZI/CZMPVhPELvr26J7ae+lQY1vrLd82O6nNnxY3JL0FFQL3JeoMCukd/6v+Q2D9sNaOmTZX3PwWazK+SASRd4ANUKa4DpclLZUYlrMRhOchNI9j99JLCLOzTKFhHE8IOcUkKpvUqetUVX4KvknZdnzcPnbr5u8FZsKhoSmbl7fUfYFK2O3mzElS+IbbbOBLlMiPLEO2Z1OH8ZVWjGDvmJYWRRGBZNtTRc=-1-1~-1~-1~-1; _hau=SUPPORTE.1769679841.1365012467; locale=bg-bg; selfSettingLanguage=true; SSO_TGC=TGTX--F1018898895-1244822-Ohd3Jf9tbeUVhHco2S0Awlge5v1VlbZTmNi; x-gray-tag=common; dp-session=x-sbvz847s7sru3xnxrxrv86mldfk57yentdhgg93xnxfsbs88nvnupf2n87rus75c9dvv1ebzuobzvxjtth5gunao6roa3y5chi9gga6lc9vxlc3wqllfrtannu6n0885; HWWAFSESTIME=1784540277913; HWWAFSESID=2ecdc583fc03a57710a; pageversion=0; JSESSIONID=994F6CE07407C4C1A87FDD3325E7BB90'
     }
 
     try:
         response = requests.post(url, headers=headers, data=payload, timeout=10)
-        # Връща True, ако HTTP статусът е OK (200)
         return response.status_code == 200, response.text
     except Exception as e:
         return False, str(e)
 
-# Главен път за зареждане на страницата
 @app.route('/')
 def index():
     return """
@@ -53,35 +49,42 @@ def index():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Бот Управление</title>
+        <title>Бот Управление - ФТВ Сливен</title>
         <style>
-            body { font-family: sans-serif; text-align: center; background: #1e293b; color: white; padding-top: 40px; }
-            .btn { padding: 15px 30px; margin: 10px; border: none; border-radius: 8px; font-size: 18px; cursor: pointer; font-weight: bold; }
+            body { font-family: sans-serif; text-align: center; background: #1e293b; color: white; padding-top: 50px; }
+            .card { background: #0f172a; display: inline-block; padding: 30px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+            .btn { padding: 18px 40px; margin: 15px; border: none; border-radius: 8px; font-size: 22px; cursor: pointer; font-weight: bold; transition: 0.2s; }
+            .btn:hover { opacity: 0.9; transform: scale(1.05); }
             .b-0 { background: #ef4444; color: white; }
-            .b-50 { background: #f59e0b; color: white; }
-            .b-100 { background: #10b981; color: white; }
+            .b-30 { background: #10b981; color: white; }
+            #status { margin-top: 20px; font-size: 18px; font-weight: bold; color: #38bdf8; }
         </style>
     </head>
     <body>
-        <h2>Бот Управление на Производството</h2>
-        <h3>ФТВ Сливен</h3>
-        <div>
-            <button class="btn b-0" onclick="setLimit(0)">0%</button>
-            <button class="btn b-50" onclick="setLimit(50)">50%</button>
-            <button class="btn b-100" onclick="setLimit(100)">100%</button>
+        <div class="card">
+            <h2>Бот Управление на Производството</h2>
+            <h3>ФТВ Сливен</h3>
+            <div>
+                <button class="btn b-0" onclick="setLimit(0)">0 kW</button>
+                <button class="btn b-30" onclick="setLimit(30)">30 kW</button>
+            </div>
+            <p id="status"></p>
         </div>
-        <p id="status"></p>
 
         <script>
-        function setLimit(percent) {
-            document.getElementById('status').innerText = 'Изпращане на заявка...';
-            fetch('/limit/sliven/' + percent)
+        function setLimit(kw) {
+            document.getElementById('status').innerText = 'Задаване на ' + kw + ' kW...';
+            fetch('/limit/sliven/' + kw)
                 .then(res => res.json())
                 .then(data => {
-                    document.getElementById('status').innerText = data.message || 'Готово!';
+                    if(data.status === 'success') {
+                        document.getElementById('status').innerText = 'Успешно зададен лимит: ' + kw + ' kW';
+                    } else {
+                        document.getElementById('status').innerText = 'Грешка: ' + (data.message || 'Неуспешна заявка');
+                    }
                 })
                 .catch(err => {
-                    document.getElementById('status').innerText = 'Грешка при връзката!';
+                    document.getElementById('status').innerText = 'Грешка при връзката с бота!';
                 });
         }
         </script>
@@ -89,17 +92,16 @@ def index():
     </html>
     """
 
-# Маршрут за промяна на лимита от бутоните
-@app.route('/limit/<location>/<int:percent>')
-def set_limit(location, percent):
-    if percent in [0, 50, 100]:
-        success, res_text = send_fusionsolar_power_limit(percent)
+@app.route('/limit/<location>/<int:kw>')
+def set_limit(location, kw):
+    if kw in [0, 30]:
+        success, res_text = send_fusionsolar_power_limit_kw(kw)
         if success:
-            return jsonify({"status": "success", "message": f"Лимитът е променен на {percent}%"}), 200
+            return jsonify({"status": "success", "message": f"Лимитът е зададен на {kw} kW"}), 200
         else:
             return jsonify({"status": "error", "message": res_text}), 500
     
-    return jsonify({"status": "error", "message": "Невалиден процент"}), 400
+    return jsonify({"status": "error", "message": "Разрешени са само 0 kW или 30 kW"}), 400
 
-if __name__ == '__main__':
+if name == 'main':
     app.run(host='0.0.0.0', port=10000)
