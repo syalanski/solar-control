@@ -1,5 +1,5 @@
+import json
 from datetime import datetime
-import os
 from flask import Flask, jsonify, request
 import pytz
 import requests
@@ -8,7 +8,9 @@ app = Flask(__name__)
 
 bg_tz = pytz.timezone('Europe/Sofia')
 
-# Конфигурация за двете централи
+# Глобална променлива за активната бисквитка
+CURRENT_COOKIE = ""
+
 PLANTS = {
     'sliven': {
         'name': 'ФТВ Сливен',
@@ -38,59 +40,19 @@ PLANTS = {
     },
 }
 
-# Извличаме акаунта от настройките на Render (Environment Variables)
-FUSIONSOLAR_USER = os.environ.get('FUSIONSOLAR_USER', '')
-FUSIONSOLAR_PASS = os.environ.get('FUSIONSOLAR_PASS', '')
-
-def get_authenticated_session():
-  """Автоматично влиза във FusionSolar и изпечатва точния отговор при грешка"""
-  session = requests.Session()
-  login_url = 'https://uni003eu5.fusionsolar.huawei.com/rest/pvms/web/security/v1/login'
-
-  headers = {
-      'Accept': 'application/json, text/javascript, */*; q=0.01',
-      'Content-Type': 'application/json;charset=UTF-8',
-      'User-Agent': (
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,'
-          ' like Gecko) Chrome/150.0.0.0 Safari/537.36'
-      ),
-  }
-
-  payload = {'userName': FUSIONSOLAR_USER, 'value': FUSIONSOLAR_PASS}
-
-  try:
-    response = session.post(
-        login_url, json=payload, headers=headers, timeout=10
-    )
-    print(f'[LOGIN RESPONSE CODE] {response.status_code}')
-    print(f'[LOGIN RESPONSE BODY] {response.text}')
-
-    if response.status_code == 200:
-      data = response.json()
-      if data.get('data', {}).get('curUser'):
-        return session
-  except Exception as e:
-    print(f'[LOGIN EXCEPTION] {str(e)}')
-
-  return None
-
-
 
 def send_fusionsolar_power_limit_kw(dn_value, kw_value):
-  """Изпраща команда за ограничение, ползвайки свежа сесия"""
-  session = get_authenticated_session()
-  if not session:
-    return False, 'Грешка при автоматичния вход във FusionSolar!'
+  global CURRENT_COOKIE
+
+  if not CURRENT_COOKIE:
+    return False, 'Няма въведена активна Cookie бисквитка!'
 
   url = 'https://uni003eu5.fusionsolar.huawei.com/rest/neteco/config/device/v1/config/power-control'
 
   payload = {
       'dn': dn_value,
-      'changeValues': f'[{{"id":"21003","value":{kw_value}}}]',
+      'changeValues': json.dumps([{'id': '21003', 'value': kw_value}]),
   }
-
-  # Извличаме roarand от бисквитките, ако го има
-  roarand = session.cookies.get('roarand', '')
 
   headers = {
       'Accept': 'application/json, text/javascript, */*; q=0.01',
@@ -104,16 +66,15 @@ def send_fusionsolar_power_limit_kw(dn_value, kw_value):
           ' like Gecko) Chrome/150.0.0.0 Safari/537.36'
       ),
       'X-Requested-With': 'XMLHttpRequest',
-      'roarand': roarand,
+      'Cookie': CURRENT_COOKIE,
   }
 
   try:
-    response = session.post(url, headers=headers, data=payload, timeout=10)
-    res_data = response.json()
-    if response.status_code == 200 and res_data.get('failCode') == 0:
+    response = requests.post(url, headers=headers, data=payload, timeout=10)
+    if response.status_code == 200:
       return True, 'Успешно зададен лимит'
     else:
-      return False, f'Грешка от Huawei: {response.text}'
+      return False, f'Грешка {response.status_code}: {response.text}'
   except Exception as e:
     return False, str(e)
 
@@ -135,7 +96,6 @@ def check_and_execute_schedules():
     h_max, m_max = map(int, sched['time_on'].split(':'))
     target_on = h_max * 60 + m_max
 
-    # Проверка за 0 kW
     if (
         now_minutes >= target_off
         and now_minutes < target_on
@@ -147,7 +107,6 @@ def check_and_execute_schedules():
       sched['last_action'] = f'Автоматично в {current_time_str}: {status}'
       messages.append(f"{plant['name']}: {status}")
 
-    # Проверка за MAX kW
     elif now_minutes >= target_on and not sched['executed_today_on']:
       max_kw = plant['max_kw']
       success, res = send_fusionsolar_power_limit_kw(plant['dn'], max_kw)
@@ -156,7 +115,6 @@ def check_and_execute_schedules():
       sched['last_action'] = f'Автоматично в {current_time_str}: {status}'
       messages.append(f"{plant['name']}: {status}")
 
-    # Нулиране нощем
     if current_time_str == '00:00':
       sched['executed_today_off'] = False
       sched['executed_today_on'] = False
@@ -245,12 +203,23 @@ def index():
             input[type="time"] {{ padding: 10px; border-radius: 6px; border: 1px solid #475569; font-size: 16px; width: 93%; background: #0f172a; color: white; }}
             .save-btn {{ background: #3b82f6; color: white; padding: 12px; width: 100%; border: none; border-radius: 6px; font-size: 16px; cursor: pointer; margin-top: 10px; font-weight: bold; }}
             .status-p {{ margin-top: 15px; font-size: 15px; font-weight: bold; color: #38bdf8; min-height: 20px; }}
+            
+            .cookie-box {{ background: #0f172a; padding: 20px; border-radius: 12px; max-width: 820px; margin: 20px auto; text-align: left; }}
+            .cookie-box textarea {{ width: 97%; height: 60px; background: #1e293b; color: #38bdf8; border: 1px solid #475569; border-radius: 6px; padding: 8px; font-family: monospace; font-size: 12px; }}
         </style>
     </head>
     <body>
         <h1>Управление на ФТВ Централи</h1>
         <div class="container">
             {cards_html}
+        </div>
+
+        <div class="cookie-box">
+            <h3>🔑 Настройка на FusionSolar Cookie</h3>
+            <p style="font-size: 13px; color: #94a3b8;">Постави новия Cookie тук, когато сесията изтече:</p>
+            <textarea id="cookie_input" placeholder="JSESSIONID=..."></textarea>
+            <button class="save-btn" style="width: auto; padding: 10px 20px;" onclick="updateCookie()">Обнови Cookie</button>
+            <span id="cookie_status" style="margin-left: 15px; font-weight: bold;"></span>
         </div>
 
         <script>
@@ -281,10 +250,34 @@ def index():
                 location.reload();
             }});
         }}
+
+        function updateCookie() {{
+            const cookieVal = document.getElementById('cookie_input').value.trim();
+            if(!cookieVal) {{ alert('Въведи cookie!'); return; }}
+            
+            fetch('/update-cookie', {{
+                method: 'POST',
+                headers: {{ 'Content-Type': 'application/json' }},
+                body: JSON.stringify({{ cookie: cookieVal }})
+            }})
+            .then(res => res.json())
+            .then(data => {{
+                document.getElementById('cookie_status').innerText = '✅ Обновено!';
+                document.getElementById('cookie_status').style.color = '#10b981';
+            }});
+        }}
         </script>
     </body>
     </html>
     """
+
+
+@app.route('/update-cookie', methods=['POST'])
+def update_cookie():
+  global CURRENT_COOKIE
+  data = request.json
+  CURRENT_COOKIE = data.get('cookie', '')
+  return jsonify({'status': 'success', 'message': 'Cookie е обновено успешно!'})
 
 
 @app.route('/limit/<plant_id>/<int:kw>')
