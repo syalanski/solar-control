@@ -47,7 +47,7 @@ def send_fusionsolar_power_limit(limit_value):
 # Главен път за зареждане на страницата
 @app.route('/')
 def index():
-    return render_template('index.html')  # или както ти се казва HTML файла
+    return render_template('index.html')
 
 # Маршрут за промяна на лимита от бутоните
 @app.route('/limit/<location>/<int:percent>')
