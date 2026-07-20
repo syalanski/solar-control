@@ -1,5 +1,6 @@
 from datetime import datetime
 import json
+import os
 from curl_cffi import requests
 from flask import Flask, jsonify, request
 import pytz
@@ -40,7 +41,7 @@ PLANTS = {
 
 
 def get_authenticated_session():
-  """Автоматичен вход във FusionSolar с имитация на истински Chrome (честотен TLS отпечатък)"""
+  """Автоматичен вход във FusionSolar с имитация на истински Chrome"""
   session = requests.Session(impersonate='chrome120')
 
   login_url = 'https://uni003eu5.fusionsolar.huawei.com/rest/pvms/web/security/v1/login'
@@ -56,8 +57,8 @@ def get_authenticated_session():
   }
 
   payload = {
-      'userName': request.environ.get('FUSIONSOLAR_USER', ''),
-      'value': request.environ.get('FUSIONSOLAR_PASS', ''),
+      'userName': os.environ.get('FUSIONSOLAR_USER', ''),
+      'value': os.environ.get('FUSIONSOLAR_PASS', ''),
   }
 
   try:
@@ -80,7 +81,6 @@ def get_authenticated_session():
 
 
 def send_fusionsolar_power_limit_kw(dn_value, kw_value):
-  # Опит за автоматично вземане на сесия
   session = get_authenticated_session()
 
   if not session:
@@ -328,5 +328,3 @@ def check_schedule():
 
 if __name__ == '__main__':
   app.run(host='0.0.0.0', port=10000)
-
-            
