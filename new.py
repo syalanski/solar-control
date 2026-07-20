@@ -47,7 +47,47 @@ def send_fusionsolar_power_limit(limit_value):
 # Главен път за зареждане на страницата
 @app.route('/')
 def index():
-    return render_template('index.html')
+    return """
+    <!DOCTYPE html>
+    <html lang="bg">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Бот Управление</title>
+        <style>
+            body { font-family: sans-serif; text-align: center; background: #1e293b; color: white; padding-top: 40px; }
+            .btn { padding: 15px 30px; margin: 10px; border: none; border-radius: 8px; font-size: 18px; cursor: pointer; font-weight: bold; }
+            .b-0 { background: #ef4444; color: white; }
+            .b-50 { background: #f59e0b; color: white; }
+            .b-100 { background: #10b981; color: white; }
+        </style>
+    </head>
+    <body>
+        <h2>Бот Управление на Производството</h2>
+        <h3>ФТВ Сливен</h3>
+        <div>
+            <button class="btn b-0" onclick="setLimit(0)">0%</button>
+            <button class="btn b-50" onclick="setLimit(50)">50%</button>
+            <button class="btn b-100" onclick="setLimit(100)">100%</button>
+        </div>
+        <p id="status"></p>
+
+        <script>
+        function setLimit(percent) {
+            document.getElementById('status').innerText = 'Изпращане на заявка...';
+            fetch('/limit/sliven/' + percent)
+                .then(res => res.json())
+                .then(data => {
+                    document.getElementById('status').innerText = data.message || 'Готово!';
+                })
+                .catch(err => {
+                    document.getElementById('status').innerText = 'Грешка при връзката!';
+                });
+        }
+        </script>
+    </body>
+    </html>
+    """
 
 # Маршрут за промяна на лимита от бутоните
 @app.route('/limit/<location>/<int:percent>')
