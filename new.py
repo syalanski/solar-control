@@ -42,9 +42,8 @@ PLANTS = {
 FUSIONSOLAR_USER = os.environ.get('FUSIONSOLAR_USER', '')
 FUSIONSOLAR_PASS = os.environ.get('FUSIONSOLAR_PASS', '')
 
-
 def get_authenticated_session():
-  """Автоматично влиза във FusionSolar и връща активна сесия с нови бисквитки"""
+  """Автоматично влиза във FusionSolar и изпечатва точния отговор при грешка"""
   session = requests.Session()
   login_url = 'https://uni003eu5.fusionsolar.huawei.com/rest/pvms/web/security/v1/login'
 
@@ -63,15 +62,18 @@ def get_authenticated_session():
     response = session.post(
         login_url, json=payload, headers=headers, timeout=10
     )
+    print(f'[LOGIN RESPONSE CODE] {response.status_code}')
+    print(f'[LOGIN RESPONSE BODY] {response.text}')
+
     if response.status_code == 200:
       data = response.json()
       if data.get('data', {}).get('curUser'):
-        # Успешен логин! Сесията вече съдържа новите бисквитки
         return session
   except Exception as e:
-    print(f'[LOGIN ERROR] {str(e)}')
+    print(f'[LOGIN EXCEPTION] {str(e)}')
 
   return None
+
 
 
 def send_fusionsolar_power_limit_kw(dn_value, kw_value):
