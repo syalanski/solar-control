@@ -45,33 +45,36 @@ PLANTS = {
 }
 
 
+OPENAPI_HOST = "https://uni003eu5.fusionsolar.huawei.com"
+
+
 def get_openapi_token():
-    """Влизане през официалния Northbound OpenAPI интерфейс"""
-    url = f"{OPENAPI_HOST}/thirdparty/login"
-    payload = {
-        "systemCode": SYSTEM_CODE,
-        "secretKey": SECRET_KEY
-    }
-    headers = {
-        "Content-Type": "application/json"
-    }
-    
-    try:
-        response = requests.post(url, json=payload, headers=headers, timeout=15)
-        print(f"[OPENAPI LOGIN CODE] {response.status_code}")
-        
-        # Токенът обикновено се връща в заглавната част (Headers)
-        token = response.headers.get("XSRF-TOKEN")
-        
-        if response.status_code == 200 and token:
-            print("[OPENAPI LOGIN SUCCESS] Успешно вземане на API токен!")
-            return token
-        else:
-            print(f"[OPENAPI LOGIN FAIL] Отговор: {response.text}")
-            return None
-    except Exception as e:
-        print(f"[OPENAPI EXCEPTION] {str(e)}")
-        return None
+  """Влизане през официалния Northbound API интерфейс (/thirdData/login)"""
+  url = f"{OPENAPI_HOST}/thirdData/login"
+
+  payload = {"userName": SYSTEM_CODE, "systemCode": SECRET_KEY}
+
+  headers = {"Content-Type": "application/json"}
+
+  try:
+    response = requests.post(url, json=payload, headers=headers, timeout=15)
+    print(f"[OPENAPI LOGIN CODE] {response.status_code}")
+
+    if response.status_code == 200:
+      data = response.json()
+      # В Northbound API токенът или сесията идва в XSFR-TOKEN header или в JSON отговора
+      token = response.headers.get("XSRF-TOKEN") or data.get("data")
+      print(
+          f"[OPENAPI LOGIN SUCCESS] Успешен вход! Отговор: {response.text[:100]}"
+      )
+      return token
+    else:
+      print(f"[OPENAPI LOGIN FAIL] Грешка {response.status_code}: {response.text}")
+      return None
+  except Exception as e:
+    print(f"[OPENAPI EXCEPTION] {str(e)}")
+    return None
+
 
 
 def send_fusionsolar_power_limit_kw(dn_value, kw_value):
