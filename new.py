@@ -25,7 +25,7 @@ PLANTS = {
     },
     'petro': {
         'name': 'ФТВ Петро',
-        'dn': 'NE=135112688',
+        'dn': 'NE=135282380',
         'max_kw': 90,
         'schedule': {
             'enabled': False,
@@ -278,7 +278,7 @@ def set_limit(plant_id, kw):
                 ),
             }),
             200,
-        )
+      )
       else:
         return jsonify({'status': 'error', 'message': res_text}), 500
   return jsonify({'status': 'error', 'message': 'Невалидни параметри'}), 400
