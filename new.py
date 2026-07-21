@@ -9,7 +9,7 @@ app = Flask(__name__)
 
 bg_tz = pytz.timezone('Europe/Sofia')
 
-# Конфигурация за OpenAPI
+# Конфигурация за OpenAPI (по подразбиране с твоите данни)
 SYSTEM_CODE = os.environ.get('FUSIONSOLAR_USER', 'Proba_Bot')
 SECRET_KEY = os.environ.get('FUSIONSOLAR_PASS', 'Lamer1234')
 
@@ -45,73 +45,49 @@ PLANTS = {
 
 
 def get_openapi_token():
-  """Влизане през FusionSolar API с оптимизирани кратки таймаути"""
+  """Влизане през FusionSolar Northbound API"""
   host = 'https://uni003eu5.fusionsolar.huawei.com'
-  endpoints = ['/thirdData/login', '/thirdparty/login', '/rest/openapi/login']
+  url = f'{host}/thirdData/login'
 
   payload = {'userName': SYSTEM_CODE, 'systemCode': SECRET_KEY}
   headers = {'Content-Type': 'application/json'}
 
-  for ep in endpoints:
-    url = f'{host}{ep}'
-    try:
-      # Намален timeout до 5 сек, за да не гърми Gunicorn WORKER TIMEOUT в Render
-      response = requests.post(
-          url, json=payload, headers=headers, timeout=5, allow_redirects=True
-      )
-      print(f'[TEST API LOGIN] {url} -> Status: {response.status_code}')
+  try:
+    response = requests.post(url, json=payload, headers=headers, timeout=6)
+    print(f'[TEST API LOGIN] {url} -> Status: {response.status_code}')
 
-      if response.status_code == 200:
-        token = (
-            response.headers.get('XSRF-TOKEN')
-            or response.cookies.get('XSRF-TOKEN')
-            or response.cookies.get('BSessionID')
+    if response.status_code == 200:
+      try:
+        data = response.json()
+        if data.get('failCode') == 0:
+          token = response.headers.get('XSRF-TOKEN') or data.get('data')
+          print(f'[OPENAPI LOGIN SUCCESS] Успешен токен: {token[:15]}...')
+          return token, host, '/thirdData/login'
+        else:
+          print(
+              f"[TEST API LOGIN] Грешни данни или права: {data.get('message')}"
+              f" (Код: {data.get('failCode')})"
+          )
+      except Exception:
+        print(
+            '[TEST API LOGIN] Върна HTML вместо JSON. Увери се, че акаунтът е'
+            ' Northbound API!'
         )
 
-        if not token:
-          try:
-            data = response.json()
-            token = (
-                data.get('xsrfToken')
-                or data.get('data')
-                or (data.get('params') and data.get('params').get('token'))
-            )
-          except Exception:
-            pass
-
-        if token:
-          print(
-              f'[OPENAPI LOGIN SUCCESS] Успешен токен/сесия през {ep}:'
-              f' {token[:15]}...'
-          )
-          return token, host, ep
-
-    except Exception as e:
-      print(f'[TEST API LOGIN] {url} Грешка/Timeout: {str(e)}')
+  except Exception as e:
+    print(f'[TEST API LOGIN] Грешка при връзка/timeout: {str(e)}')
 
   return None, None, None
 
 
 def send_fusionsolar_power_limit_kw(dn_value, kw_value):
+  """Изпращане на задача за ограничение на активната мощност по спецификацията на Huawei"""
   token, host, login_ep = get_openapi_token()
 
   if not token:
-    return False, 'Грешка при API вход (таймаут или невалидни данни)'
+    return False, 'Грешка при API вход (провери Northbound акаунта в панела)'
 
-  if 'thirdparty' in login_ep:
-    base_path = '/thirdparty/config/device/power-control'
-  elif 'openapi' in login_ep:
-    base_path = '/rest/openapi/config/device/power-control'
-  else:
-    base_path = '/thirdData/config/device/power-control'
-
-  url = f'{host}{base_path}'
-
-  payload = {
-      'devType': 'INVERTER',
-      'dn': dn_value,
-      'controls': [{'id': '21003', 'value': str(kw_value)}],
-  }
+  create_task_url = f'{host}/thirdData/devControl'
 
   headers = {
       'Content-Type': 'application/json',
@@ -119,14 +95,38 @@ def send_fusionsolar_power_limit_kw(dn_value, kw_value):
       'Cookie': f'BSessionID={token}',
   }
 
+  payload = {
+      'devDn': dn_value,
+      'devType': 1,  # 1 за Инвертор
+      'controlType': 1,  # 1 за Активна мощност (Active Power Control)
+      'paramValues': [{'paramId': '21003', 'paramValue': str(kw_value)}],
+  }
+
   try:
-    response = requests.post(url, json=payload, headers=headers, timeout=8)
+    response = requests.post(
+        create_task_url, json=payload, headers=headers, timeout=8
+    )
+    print(
+        f'[DEV CONTROL] Task Response: {response.status_code} -'
+        f' {response.text[:200]}'
+    )
+
     if response.status_code == 200:
-      return True, 'Успешно зададен лимит'
+      data = response.json()
+      if data.get('failCode') == 0:
+        task_id = data.get('data')
+        return True, f'Зададен лимит {kw_value} kW (Task ID: {task_id})'
+      else:
+        return (
+            False,
+            f"Грешка от FusionSolar: {data.get('message')} (Код:"
+            f" {data.get('failCode')})",
+        )
     else:
       return False, f'Грешка {response.status_code}: {response.text[:150]}'
+
   except Exception as e:
-    return False, str(e)
+    return False, f'Изключение при изпращане: {str(e)}'
 
 
 def check_and_execute_schedules():
@@ -341,3 +341,4 @@ def check_schedule():
 
 if __name__ == '__main__':
   app.run(host='0.0.0.0', port=10000)
+
