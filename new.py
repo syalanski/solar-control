@@ -46,7 +46,7 @@ PLANTS = {
 
 def get_openapi_token():
   """Влизане през FusionSolar Northbound API за uni003eu5 (Region 3)"""
-  host = 'https://uni003eu5.fusionsolar.huawei.com'
+  host = 'https://eu5.fusionsolar.huawei.com'
 
   # Ендпоинти, ползвани в тази версия на SmartPVMS
   endpoints = ['/thirdData/login', '/thirdData/getOpenApiToken']
