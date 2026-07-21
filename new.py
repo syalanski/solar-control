@@ -9,8 +9,7 @@ app = Flask(__name__)
 
 bg_tz = pytz.timezone('Europe/Sofia')
 
-# Конфигурация за OpenAPI (точен хост за твоя клъстер)
-OPENAPI_HOST = 'https://uni003eu5.fusionsolar.huawei.com'
+# Конфигурация за OpenAPI
 SYSTEM_CODE = os.environ.get('FUSIONSOLAR_USER', 'Proba_Bot')
 SECRET_KEY = os.environ.get('FUSIONSOLAR_PASS', 'Lamer1234')
 
@@ -46,67 +45,69 @@ PLANTS = {
 
 
 def get_openapi_token():
-  """Пробва стандартните Northbound API endpoints за вход"""
-  endpoints = [
-      '/thirdparty/login',
-      '/rest/openapi/login',
-      '/thirdData/login',
+  """Влизане през FusionSolar Northbound OpenAPI с поддръжка на порт 27250"""
+  hosts = [
+      'https://uni003eu5.fusionsolar.huawei.com:27250',
+      'https://uni003eu5.fusionsolar.huawei.com',
   ]
+  endpoints = ['/thirdData/login', '/thirdparty/login', '/rest/openapi/login']
 
   payload = {'userName': SYSTEM_CODE, 'systemCode': SECRET_KEY}
   headers = {'Content-Type': 'application/json'}
 
-  for ep in endpoints:
-    url = f'{OPENAPI_HOST}{ep}'
-    try:
-      response = requests.post(url, json=payload, headers=headers, timeout=10)
-      print(f'[TEST API LOGIN] {ep} -> Status: {response.status_code}')
+  for host in hosts:
+    for ep in endpoints:
+      url = f'{host}{ep}'
+      try:
+        response = requests.post(
+            url, json=payload, headers=headers, timeout=10
+        )
+        print(f'[TEST API LOGIN] {url} -> Status: {response.status_code}')
 
-      # Ако отговорът започва с '<html', значи е уеб страница, а не API endpoint
-      if response.text.strip().startswith(
-          '<html'
-      ) or response.text.strip().startswith('<!DOCTYPE'):
-        print(f'[TEST API LOGIN] {ep} върна HTML (не е API)')
-        continue
+        # Ако е HTML уеб страница, я пропускаме
+        if response.text.strip().startswith(
+            '<html'
+        ) or response.text.strip().startswith('<!DOCTYPE'):
+          print(f'[TEST API LOGIN] {url} върна HTML')
+          continue
 
-      if response.status_code == 200:
-        try:
-          data = response.json()
-          token = (
-              response.headers.get('XSRF-TOKEN')
-              or response.cookies.get('XSRF-TOKEN')
-              or response.headers.get('xsrf-token')
-              or data.get('data')
-              or data.get('xsrfToken')
-          )
-
-          if token:
-            print(
-                f'[OPENAPI LOGIN SUCCESS] Намерен токен през {ep}:'
-                f' {token[:15]}...'
+        if response.status_code == 200:
+          try:
+            data = response.json()
+            token = (
+                response.headers.get('XSRF-TOKEN')
+                or response.cookies.get('XSRF-TOKEN')
+                or response.headers.get('xsrf-token')
+                or data.get('data')
+                or data.get('xsrfToken')
             )
-            return token, ep
-          else:
-            print(
-                f'[TEST API LOGIN] {ep} върна 200, но няма токен в отговора:'
-                f' {response.text[:150]}'
-            )
-        except Exception as e:
-          print(f'[TEST API LOGIN] {ep} JSON грешка: {str(e)}')
 
-    except Exception as e:
-      print(f'[TEST API LOGIN] {ep} Грешка: {str(e)}')
+            if token:
+              print(
+                  f'[OPENAPI LOGIN SUCCESS] Успешен токен през {url}:'
+                  f' {token[:15]}...'
+              )
+              return token, host, ep
+            else:
+              print(
+                  f'[TEST API LOGIN] {url} върна JSON, но няма токен:'
+                  f' {response.text[:150]}'
+              )
+          except Exception as e:
+            print(f'[TEST API LOGIN] {url} JSON грешка: {str(e)}')
 
-  return None, None
+      except Exception as e:
+        print(f'[TEST API LOGIN] {url} Грешка: {str(e)}')
+
+  return None, None, None
 
 
 def send_fusionsolar_power_limit_kw(dn_value, kw_value):
-  token, login_ep = get_openapi_token()
+  token, host, login_ep = get_openapi_token()
 
   if not token:
-    return False, 'Грешка при OpenAPI вход (невалиден endpoint или данни за вход)'
+    return False, 'Грешка при OpenAPI вход (провери профила/порта за OpenAPI)'
 
-  # Определяме базовия път на база открития логин endpoint
   if 'thirdparty' in login_ep:
     base_path = '/thirdparty/config/device/power-control'
   elif 'openapi' in login_ep:
@@ -114,7 +115,7 @@ def send_fusionsolar_power_limit_kw(dn_value, kw_value):
   else:
     base_path = '/thirdData/config/device/power-control'
 
-  url = f'{OPENAPI_HOST}{base_path}'
+  url = f'{host}{base_path}'
 
   payload = {
       'devType': 'INVERTER',
