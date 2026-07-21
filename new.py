@@ -45,59 +45,49 @@ PLANTS = {
 
 
 def get_openapi_token():
-  """Влизане през FusionSolar Northbound OpenAPI с поддръжка на порт 27250"""
-  hosts = [
-      'https://uni003eu5.fusionsolar.huawei.com:27250',
-      'https://uni003eu5.fusionsolar.huawei.com',
-  ]
+  """Влизане през FusionSolar API с оптимизирани кратки таймаути"""
+  host = 'https://uni003eu5.fusionsolar.huawei.com'
   endpoints = ['/thirdData/login', '/thirdparty/login', '/rest/openapi/login']
 
   payload = {'userName': SYSTEM_CODE, 'systemCode': SECRET_KEY}
   headers = {'Content-Type': 'application/json'}
 
-  for host in hosts:
-    for ep in endpoints:
-      url = f'{host}{ep}'
-      try:
-        response = requests.post(
-            url, json=payload, headers=headers, timeout=10
+  for ep in endpoints:
+    url = f'{host}{ep}'
+    try:
+      # Намален timeout до 5 сек, за да не гърми Gunicorn WORKER TIMEOUT в Render
+      response = requests.post(
+          url, json=payload, headers=headers, timeout=5, allow_redirects=True
+      )
+      print(f'[TEST API LOGIN] {url} -> Status: {response.status_code}')
+
+      if response.status_code == 200:
+        token = (
+            response.headers.get('XSRF-TOKEN')
+            or response.cookies.get('XSRF-TOKEN')
+            or response.cookies.get('BSessionID')
         )
-        print(f'[TEST API LOGIN] {url} -> Status: {response.status_code}')
 
-        # Ако е HTML уеб страница, я пропускаме
-        if response.text.strip().startswith(
-            '<html'
-        ) or response.text.strip().startswith('<!DOCTYPE'):
-          print(f'[TEST API LOGIN] {url} върна HTML')
-          continue
-
-        if response.status_code == 200:
+        if not token:
           try:
             data = response.json()
             token = (
-                response.headers.get('XSRF-TOKEN')
-                or response.cookies.get('XSRF-TOKEN')
-                or response.headers.get('xsrf-token')
+                data.get('xsrfToken')
                 or data.get('data')
-                or data.get('xsrfToken')
+                or (data.get('params') and data.get('params').get('token'))
             )
+          except Exception:
+            pass
 
-            if token:
-              print(
-                  f'[OPENAPI LOGIN SUCCESS] Успешен токен през {url}:'
-                  f' {token[:15]}...'
-              )
-              return token, host, ep
-            else:
-              print(
-                  f'[TEST API LOGIN] {url} върна JSON, но няма токен:'
-                  f' {response.text[:150]}'
-              )
-          except Exception as e:
-            print(f'[TEST API LOGIN] {url} JSON грешка: {str(e)}')
+        if token:
+          print(
+              f'[OPENAPI LOGIN SUCCESS] Успешен токен/сесия през {ep}:'
+              f' {token[:15]}...'
+          )
+          return token, host, ep
 
-      except Exception as e:
-        print(f'[TEST API LOGIN] {url} Грешка: {str(e)}')
+    except Exception as e:
+      print(f'[TEST API LOGIN] {url} Грешка/Timeout: {str(e)}')
 
   return None, None, None
 
@@ -106,7 +96,7 @@ def send_fusionsolar_power_limit_kw(dn_value, kw_value):
   token, host, login_ep = get_openapi_token()
 
   if not token:
-    return False, 'Грешка при OpenAPI вход (провери профила/порта за OpenAPI)'
+    return False, 'Грешка при API вход (таймаут или невалидни данни)'
 
   if 'thirdparty' in login_ep:
     base_path = '/thirdparty/config/device/power-control'
@@ -123,14 +113,18 @@ def send_fusionsolar_power_limit_kw(dn_value, kw_value):
       'controls': [{'id': '21003', 'value': str(kw_value)}],
   }
 
-  headers = {'Content-Type': 'application/json', 'XSRF-TOKEN': token}
+  headers = {
+      'Content-Type': 'application/json',
+      'XSRF-TOKEN': token,
+      'Cookie': f'BSessionID={token}',
+  }
 
   try:
-    response = requests.post(url, json=payload, headers=headers, timeout=15)
+    response = requests.post(url, json=payload, headers=headers, timeout=8)
     if response.status_code == 200:
-      return True, 'Успешно зададен лимит през OpenAPI'
+      return True, 'Успешно зададен лимит'
     else:
-      return False, f'Грешка {response.status_code}: {response.text}'
+      return False, f'Грешка {response.status_code}: {response.text[:150]}'
   except Exception as e:
     return False, str(e)
 
