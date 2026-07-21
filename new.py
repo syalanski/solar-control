@@ -46,63 +46,75 @@ PLANTS = {
 
 
 def get_openapi_token():
-  """Влизане през Northbound API (/thirdData/login)"""
-  url = f"{OPENAPI_HOST}/thirdData/login"
-  payload = {"userName": SYSTEM_CODE, "systemCode": SECRET_KEY}
-  headers = {"Content-Type": "application/json"}
+  """Пробва стандартните Northbound API endpoints за вход"""
+  endpoints = [
+      '/thirdparty/login',
+      '/rest/openapi/login',
+      '/thirdData/login',
+  ]
 
-  try:
-    response = requests.post(url, json=payload, headers=headers, timeout=15)
-    print(f"[OPENAPI LOGIN CODE] {response.status_code}")
+  payload = {'userName': SYSTEM_CODE, 'systemCode': SECRET_KEY}
+  headers = {'Content-Type': 'application/json'}
 
-    if response.status_code == 200:
-      token = None
+  for ep in endpoints:
+    url = f'{OPENAPI_HOST}{ep}'
+    try:
+      response = requests.post(url, json=payload, headers=headers, timeout=10)
+      print(f'[TEST API LOGIN] {ep} -> Status: {response.status_code}')
 
-      # 1. Първо опитваме да го вземем от JSON отговора (официален формат на Northbound API)
-      try:
-        data = response.json()
-        token = (
-            data.get("xsrfToken")
-            or data.get("data")
-            or (data.get("params") and data.get("params").get("token"))
-        )
-      except Exception as json_err:
-        print(f"[OPENAPI JSON PARSE WARN] {str(json_err)}")
+      # Ако отговорът започва с '<html', значи е уеб страница, а не API endpoint
+      if response.text.strip().startswith(
+          '<html'
+      ) or response.text.strip().startswith('<!DOCTYPE'):
+        print(f'[TEST API LOGIN] {ep} върна HTML (не е API)')
+        continue
 
-      # 2. Ако го няма в JSON, проверяваме в Headers / Cookies
-      if not token:
-        token = (
-            response.headers.get("XSRF-TOKEN")
-            or response.cookies.get("XSRF-TOKEN")
-            or response.headers.get("xsrf-token")
-        )
+      if response.status_code == 200:
+        try:
+          data = response.json()
+          token = (
+              response.headers.get('XSRF-TOKEN')
+              or response.cookies.get('XSRF-TOKEN')
+              or response.headers.get('xsrf-token')
+              or data.get('data')
+              or data.get('xsrfToken')
+          )
 
-      if token:
-        print(f"[OPENAPI LOGIN SUCCESS] Успешен токен: {token[:15]}...")
-        return token
-      else:
-        print(
-            "[OPENAPI LOGIN FAIL] Успешна заявка (200), но токенът не бе"
-            f" намерен в отговора: {response.text[:200]}"
-        )
-        return None
-    else:
-      print(f"[OPENAPI LOGIN FAIL] Грешка {response.status_code}: {response.text}")
-      return None
-  except Exception as e:
-    print(f"[OPENAPI EXCEPTION] {str(e)}")
-    return None
+          if token:
+            print(
+                f'[OPENAPI LOGIN SUCCESS] Намерен токен през {ep}:'
+                f' {token[:15]}...'
+            )
+            return token, ep
+          else:
+            print(
+                f'[TEST API LOGIN] {ep} върна 200, но няма токен в отговора:'
+                f' {response.text[:150]}'
+            )
+        except Exception as e:
+          print(f'[TEST API LOGIN] {ep} JSON грешка: {str(e)}')
 
-    
+    except Exception as e:
+      print(f'[TEST API LOGIN] {ep} Грешка: {str(e)}')
+
+  return None, None
 
 
 def send_fusionsolar_power_limit_kw(dn_value, kw_value):
-  token = get_openapi_token()
+  token, login_ep = get_openapi_token()
 
   if not token:
-    return False, 'Грешка при OpenAPI вход (провери потребител/парола)'
+    return False, 'Грешка при OpenAPI вход (невалиден endpoint или данни за вход)'
 
-  url = f'{OPENAPI_HOST}/thirdData/config/device/power-control'
+  # Определяме базовия път на база открития логин endpoint
+  if 'thirdparty' in login_ep:
+    base_path = '/thirdparty/config/device/power-control'
+  elif 'openapi' in login_ep:
+    base_path = '/rest/openapi/config/device/power-control'
+  else:
+    base_path = '/thirdData/config/device/power-control'
+
+  url = f'{OPENAPI_HOST}{base_path}'
 
   payload = {
       'devType': 'INVERTER',
