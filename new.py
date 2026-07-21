@@ -9,7 +9,7 @@ app = Flask(__name__)
 
 bg_tz = pytz.timezone('Europe/Sofia')
 
-# Конфигурация за OpenAPI (по подразбиране с твоите данни)
+# Конфигурация за Northbound OpenAPI
 SYSTEM_CODE = os.environ.get('FUSIONSOLAR_USER', 'Proba_Bot')
 SECRET_KEY = os.environ.get('FUSIONSOLAR_PASS', 'Lamer1234')
 
@@ -45,47 +45,67 @@ PLANTS = {
 
 
 def get_openapi_token():
-  """Влизане през FusionSolar Northbound API"""
+  """Влизане през FusionSolar Northbound API за uni003eu5 (Region 3)"""
   host = 'https://uni003eu5.fusionsolar.huawei.com'
-  url = f'{host}/thirdData/login'
 
-  payload = {'userName': SYSTEM_CODE, 'systemCode': SECRET_KEY}
-  headers = {'Content-Type': 'application/json'}
+  # Ендпоинти, ползвани в тази версия на SmartPVMS
+  endpoints = ['/thirdData/login', '/thirdData/getOpenApiToken']
 
-  try:
-    response = requests.post(url, json=payload, headers=headers, timeout=6)
-    print(f'[TEST API LOGIN] {url} -> Status: {response.status_code}')
+  # Пробваме двата популярни формата за ключове
+  payloads = [
+      {'userName': SYSTEM_CODE, 'systemCode': SECRET_KEY},
+      {'userName': SYSTEM_CODE, 'userKey': SECRET_KEY},
+  ]
 
-    if response.status_code == 200:
+  headers = {
+      'Content-Type': 'application/json',
+      'User-Agent': (
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      ),
+      'Origin': host,
+      'Referer': f'{host}/uniportal/pvmswebsite/assets/build/cloud.html',
+  }
+
+  for ep in endpoints:
+    url = f'{host}{ep}'
+    for payload in payloads:
       try:
-        data = response.json()
-        if data.get('failCode') == 0:
-          token = response.headers.get('XSRF-TOKEN') or data.get('data')
-          print(f'[OPENAPI LOGIN SUCCESS] Успешен токен: {token[:15]}...')
-          return token, host, '/thirdData/login'
-        else:
-          print(
-              f"[TEST API LOGIN] Грешни данни или права: {data.get('message')}"
-              f" (Код: {data.get('failCode')})"
-          )
-      except Exception:
+        response = requests.post(url, json=payload, headers=headers, timeout=8)
         print(
-            '[TEST API LOGIN] Върна HTML вместо JSON. Увери се, че акаунтът е'
-            ' Northbound API!'
+            f'[TEST API LOGIN] Опит към {url} ({list(payload.keys())}) -> Status:'
+            f' {response.status_code}'
         )
 
-  except Exception as e:
-    print(f'[TEST API LOGIN] Грешка при връзка/timeout: {str(e)}')
+        if response.status_code == 200:
+          try:
+            data = response.json()
+            if data.get('failCode') == 0:
+              token = data.get('data') or response.headers.get('XSRF-TOKEN')
+              print(
+                  f'[OPENAPI LOGIN SUCCESS] Успешен токен от {ep}:'
+                  f' {token[:15]}...'
+              )
+              return token, host, ep
+            else:
+              print(
+                  f"[TEST API LOGIN] Грешка от портала ({ep}):"
+                  f" {data.get('message')} (Код: {data.get('failCode')})"
+              )
+          except Exception:
+            print(f'[TEST API LOGIN] {ep} върна HTML/уеб форма вместо JSON')
+
+      except Exception as e:
+        print(f'[TEST API LOGIN] Грешка при връзка с {ep}: {str(e)}')
 
   return None, None, None
 
 
 def send_fusionsolar_power_limit_kw(dn_value, kw_value):
-  """Изпращане на задача за ограничение на активната мощност по спецификацията на Huawei"""
+  """Изпращане на задача за ограничение на активната мощност по спецификацията за Active Power Setting Tasks"""
   token, host, login_ep = get_openapi_token()
 
   if not token:
-    return False, 'Грешка при API вход (провери Northbound акаунта в панела)'
+    return False, 'Грешка при API вход (провери Northbound акаунта в портала)'
 
   create_task_url = f'{host}/thirdData/devControl'
 
@@ -93,6 +113,8 @@ def send_fusionsolar_power_limit_kw(dn_value, kw_value):
       'Content-Type': 'application/json',
       'XSRF-TOKEN': token,
       'Cookie': f'BSessionID={token}',
+      'Origin': host,
+      'Referer': f'{host}/uniportal/pvmswebsite/assets/build/cloud.html',
   }
 
   payload = {
@@ -341,4 +363,3 @@ def check_schedule():
 
 if __name__ == '__main__':
   app.run(host='0.0.0.0', port=10000)
-
