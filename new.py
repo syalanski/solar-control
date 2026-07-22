@@ -1,17 +1,17 @@
 from datetime import datetime
 import json
-import re
-from datetime import datetime
+import os
 from flask import Flask, jsonify, request
 import pytz
 import requests
 
 app = Flask(__name__)
+
 bg_tz = pytz.timezone('Europe/Sofia')
 
-# Потребителски данни за ВХОД в УЕБ портала (не OpenAPI, а акаунта, с който влизаш през браузъра)
-WEB_USER = 'Stako123'  # смени с потребителското си име за уеб портала
-WEB_PASS = 'PV123456'  # смени с паролата си
+# Потребител и парола
+WEB_USER = 'Stako123'
+WEB_PASS = 'PV123456'
 
 PLANTS = {
     'sliven': {
@@ -43,99 +43,102 @@ PLANTS = {
 }
 
 
-def get_authenticated_session():
-  """Автоматично влизане в уеб портала и връщане на готова сесия с валидни бисквитки"""
+def get_web_session():
+  """Създава оторизирана сесия с акаунта Stako123"""
   session = requests.Session()
   host = 'https://uni003eu5.fusionsolar.huawei.com'
 
   session.headers.update({
       'User-Agent': (
           'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+          ' (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
       ),
+      'Accept': 'application/json, text/plain, */*',
+      'Accept-Language': 'bg,en;q=0.9',
       'Origin': host,
-      'Referer': f'{host}/uniportal/pvmswebsite/assets/build/cloud.html',
+      'Referer': f'{host}/pvmswebsite/assets/build/cloud.html',
   })
 
-  # 1. Първоначална заявка за вземане на CSRF/Session бисквитки
-  init_url = f'{host}/uniportal/pvmswebsite/assets/build/cloud.html'
   try:
-    session.get(init_url, timeout=8)
-  except Exception as e:
-    print(f'[SESSION INIT ERROR] {str(e)}', flush=True)
-    return None
+    # 1. Начална страница за инициализиране на бисквитките
+    session.get(f'{host}/pvmswebsite/assets/build/cloud.html', timeout=10)
 
-  # 2. Логин заявка
-  login_url = f'{host}/uniload/login'
-  login_payload = {
-      'organizationName': '',
-      'username': WEB_USER,
-      'password': WEB_PASS,
-  }
+    # 2. Вход през уеб формата
+    login_url = f'{host}/uniload/login'
+    payload = {
+        'username': WEB_USER,
+        'password': WEB_PASS,
+        'organizationName': '',
+    }
 
-  try:
-    res = session.post(login_url, json=login_payload, timeout=10)
     print(
-        f'[LOGIN ATTEMPT] Status: {res.status_code} | Res:'
-        f' {res.text[:100]}',
+        f'[WEB LOGIN] Опит за вход като {WEB_USER} към {login_url}...',
+        flush=True,
+    )
+    res = session.post(login_url, json=payload, timeout=10)
+    print(
+        f'[WEB LOGIN RESPONSE] Status: {res.status_code} | Res:'
+        f' {res.text[:150]}',
         flush=True,
     )
 
     if res.status_code == 200 and 'html' not in res.text.lower():
       return session
     else:
-      print('[LOGIN FAILED] Неуспешен вход с предоставените данни.', flush=True)
+      print('[WEB LOGIN FAIL] Неуспешен вход през уеб формата.', flush=True)
+
   except Exception as e:
-    print(f'[LOGIN ERROR] {str(e)}', flush=True)
+    print(f'[WEB LOGIN ERROR] {str(e)}', flush=True)
 
   return None
 
 
 def send_fusionsolar_power_limit_kw(dn_value, kw_value):
-  """Изпращане на заявка през активна сесия"""
-  # Ако нямаме валидна сесия, опитваме да я създадем
-  session = get_authenticated_session()
+  session = get_web_session()
 
   if not session:
-    return False, 'Грешка при автентификация/вход във FusionSolar'
+    return False, 'Грешка при автентификация на Stako123.'
 
-  url = 'https://uni003eu5.fusionsolar.huawei.com/rest/neteco/config/device/v1/config/power-control'
+  host = 'https://uni003eu5.fusionsolar.huawei.com'
+  control_url = (
+      f'{host}/rest/neteco/config/device/v1/config/power-control'
+  )
+
+  # Вземане на XSRF токена от бисквитките
+  xsrf_token = session.cookies.get('XSRF-TOKEN') or ''
+
+  headers = {
+      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+      'X-Requested-With': 'XMLHttpRequest',
+      'X-XSRF-TOKEN': xsrf_token,
+  }
 
   payload = {
       'dn': dn_value,
       'changeValues': json.dumps([{'id': '21003', 'value': str(kw_value)}]),
   }
 
-  headers = {
-      'Accept': 'application/json, text/javascript, */*; q=0.01',
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'X-Requested-With': 'XMLHttpRequest',
-  }
-
   try:
     print(
-        f'[EXECUTE] Изпращане на {kw_value} kW към {dn_value}...', flush=True
+        f'[DEV CONTROL] Задаване на {kw_value} kW за {dn_value}...', flush=True
     )
-    response = session.post(
-        url, data=payload, headers=headers, timeout=10
-    )
+    res = session.post(control_url, data=payload, headers=headers, timeout=10)
     print(
-        f'[EXECUTE RESPONSE] Status: {response.status_code} | Text:'
-        f' {response.text[:150]}',
+        f'[DEV CONTROL RESPONSE] Status: {res.status_code} | Res:'
+        f' {res.text[:150]}',
         flush=True,
     )
 
-    if response.status_code == 200 and 'html' not in response.text.lower():
-      return True, response.text
+    if res.status_code == 200 and 'html' not in res.text.lower():
+      return True, f'Зададен лимит {kw_value} kW'
     else:
-      return False, f'Сървърът върна HTML (Сесията е отхвърлена)'
+      return False, f'Сървърът отхвърли командата (Status: {res.status_code})'
 
   except Exception as e:
-    print(f'[EXECUTE ERROR] {str(e)}', flush=True)
-    return False, str(e)
+    return False, f'Изключение: {str(e)}'
 
 
 def check_and_execute_schedules():
-  """Проверка и изпълнение на графика за двете централи"""
   now_bg = datetime.now(bg_tz)
   current_time_str = now_bg.strftime('%H:%M')
   now_minutes = now_bg.hour * 60 + now_bg.minute
@@ -152,7 +155,6 @@ def check_and_execute_schedules():
     h_max, m_max = map(int, sched['time_on'].split(':'))
     target_on = h_max * 60 + m_max
 
-    # Изпълнение на спирането (0 kW)
     if (
         now_minutes >= target_off
         and now_minutes < target_on
@@ -164,7 +166,6 @@ def check_and_execute_schedules():
       sched['last_action'] = f'Автоматично в {current_time_str}: {status}'
       messages.append(f"{plant['name']}: {status}")
 
-    # Изпълнение на пускането (Max kW)
     elif now_minutes >= target_on and not sched['executed_today_on']:
       max_kw = plant['max_kw']
       success, res = send_fusionsolar_power_limit_kw(plant['dn'], max_kw)
@@ -173,7 +174,6 @@ def check_and_execute_schedules():
       sched['last_action'] = f'Автоматично в {current_time_str}: {status}'
       messages.append(f"{plant['name']}: {status}")
 
-    # Нулиране в полунощ
     if current_time_str == '00:00':
       sched['executed_today_off'] = False
       sched['executed_today_on'] = False
@@ -195,13 +195,11 @@ def index():
     cards_html += f"""
         <div class="card">
             <h2>{plant['name']}</h2>
-            
             <h3>Ръчно задействане</h3>
             <div>
                 <button class="btn b-0" onclick="setLimit('{plant_id}', 0)">0 kW</button>
                 <button class="btn b-max" onclick="setLimit('{plant_id}', {max_kw})">{max_kw} kW</button>
             </div>
-
             <details>
                 <summary>⏱ График на ограничението</summary>
                 <div class="sched-content">
@@ -209,21 +207,17 @@ def index():
                         <label>Начало (0 kW):</label>
                         <input type="time" id="time_off_{plant_id}" value="{sched['time_off']}">
                     </div>
-
                     <div class="input-group">
                         <label>Край ({max_kw} kW):</label>
                         <input type="time" id="time_on_{plant_id}" value="{sched['time_on']}">
                     </div>
-
                     <div style="margin-top: 15px;">
                         <label style="font-size: 15px; color: white; cursor: pointer;">
                             <input type="checkbox" id="sched_enable_{plant_id}" {"checked" if sched['enabled'] else ""}> 
                             Включи автоматичен график
                         </label>
                     </div>
-
                     <button class="save-btn" onclick="saveSchedule('{plant_id}')">Запази графика</button>
-                    
                     <p style="font-size: 12px; color: #94a3b8; margin-top: 12px; margin-bottom: 0;">
                         Статус: <b>{"АКТИВЕН" if sched['enabled'] else "ИЗКЛЮЧЕН"}</b><br>
                         Последно: {sched['last_action']}
@@ -240,7 +234,7 @@ def index():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Управление на ФТВ Централи</title>
+        <title>Управление на ФТВ</title>
         <style>
             body {{ font-family: sans-serif; text-align: center; background: #1e293b; color: white; padding: 20px; }}
             .container {{ display: flex; flex-wrap: wrap; justify-content: center; gap: 20px; }}
@@ -248,14 +242,12 @@ def index():
             .btn {{ padding: 15px 25px; margin: 8px; border: none; border-radius: 8px; font-size: 18px; cursor: pointer; font-weight: bold; }}
             .b-0 {{ background: #ef4444; color: white; }}
             .b-max {{ background: #10b981; color: white; }}
-            
             details {{ background: #334155; border-radius: 8px; margin-top: 20px; text-align: left; overflow: hidden; }}
             summary {{ padding: 15px; font-size: 16px; font-weight: bold; cursor: pointer; background: #475569; list-style: none; display: flex; justify-content: space-between; align-items: center; }}
             summary::-webkit-details-marker {{ display: none; }}
             summary:after {{ content: '►'; font-size: 12px; }}
             details[open] summary:after {{ content: '▼'; }}
             .sched-content {{ padding: 15px; }}
-            
             .input-group {{ margin: 12px 0; }}
             label {{ font-size: 14px; color: #cbd5e1; display: block; margin-bottom: 4px; }}
             input[type="time"] {{ padding: 10px; border-radius: 6px; border: 1px solid #475569; font-size: 16px; width: 93%; background: #0f172a; color: white; }}
@@ -268,7 +260,6 @@ def index():
         <div class="container">
             {cards_html}
         </div>
-
         <script>
         function setLimit(plantId, kw) {{
             document.getElementById('status_' + plantId).innerText = 'Задаване на ' + kw + ' kW...';
@@ -278,14 +269,11 @@ def index():
                     document.getElementById('status_' + plantId).innerText = data.message || 'Готово!';
                 }});
         }}
-
         function saveSchedule(plantId) {{
             const enabled = document.getElementById('sched_enable_' + plantId).checked;
             const tOff = document.getElementById('time_off_' + plantId).value;
             const tOn = document.getElementById('time_on_' + plantId).value;
-
             document.getElementById('status_' + plantId).innerText = 'Запазване...';
-
             fetch('/set-schedule/' + plantId, {{
                 method: 'POST',
                 headers: {{ 'Content-Type': 'application/json' }},
@@ -334,10 +322,8 @@ def set_schedule(plant_id):
     sched['enabled'] = data.get('enabled', False)
     sched['time_off'] = data.get('time_off', '')
     sched['time_on'] = data.get('time_on', '')
-
     sched['executed_today_off'] = False
     sched['executed_today_on'] = False
-
     return jsonify({'status': 'success', 'message': 'Графикът е запазен'})
   return jsonify({'status': 'error', 'message': 'Несъществуваща централа'}), 400
 
