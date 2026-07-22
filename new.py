@@ -1,27 +1,18 @@
 from datetime import datetime
 import json
+import re
+from datetime import datetime
 from flask import Flask, jsonify, request
 import pytz
 import requests
 
 app = Flask(__name__)
-
 bg_tz = pytz.timezone('Europe/Sofia')
 
-# Бисквитки и заглавни части за уеб сесията към FusionSolar
-FUSIONSOLAR_COOKIES = (
-    'JSESSIONID=2067FF3BEF6F4A56EE37EBFE00F00FF3;'
-    ' _abck=82C3C6C60F1F1F52658ACD85E9B48609~-1~YAAQFi0UAtq2yG6aAQAApMX3fA5m4N0fpnwPdPZ8gTwth5RNKhPuPZFTR/IJ2z06RIxx81l9X3COwALNVLVeTli4j1u3x7ahO80oDi75g1ojJ/vgXzUOa1ZlKdUnpE/gFb+1rbuitSn3IBG8IqZ2indUe22Lmwksc/l5wHt058dRT3/In4G2bkMAaoMhImNAY5B3+pBEZjeK7zY6XudzNeguwi7/9aNY2Y8edpjStgZI/CZMPVhPELvr26J7ae+lQY1vrLd82O6nNnxY3JL0FFQL3JeoMCukd/6v+Q2D9sNaOmTZX3PwWazK+SASRd4ANUKa4DpclLZUYlrMRhOchNI9j99JLCLOzTKFhHE8IOcUkKpvUqetUVX4KvknZdnzcPnbr5u8FZsKhoSmbl7fUfYFK2O3mzElS+IbbbOBLlMiPLEO2Z1OH8ZVWjGDvmJYWRRGBZNtTRc=~-1~-1~-1~-1~-1;'
-    ' __hau=SUPPORTE.1769679841.1365012467; locale=bg-bg;'
-    ' selfSettingLanguage=true;'
-    ' SSO_TGC_=TGTX--F1018898895-1244822-Ohd3Jf9tbeUVhHco2S0Awlge5v1VlbZTmNi;'
-    ' x-gray-tag=common;'
-    ' dp-session=x-sbvz847s7sru3xnxrxrv86mldfk57yentdhgg93xnxfsbs88nvnupf2n87rus75c9dvv1ebzuobzvxjtth5gunao6roa3y5chi9gga6lc9vxlc3wqllfrtannu6n0885;'
-    ' HWWAFSESTIME=1784540277913; HWWAFSESID=2ecdc583fc03a57710a;'
-    ' pageversion=0; JSESSIONID=994F6CE07407C4C1A87FDD3325E7BB90'
-)
+# Потребителски данни за ВХОД в УЕБ портала (не OpenAPI, а акаунта, с който влизаш през браузъра)
+WEB_USER = 'ТВОЯ_ПОТРЕБИТЕЛ'  # смени с потребителското си име за уеб портала
+WEB_PASS = 'ТВОЯТА_ПАРОЛА'  # смени с паролата си
 
-# Конфигурация на двете централи
 PLANTS = {
     'sliven': {
         'name': 'ФТВ Сливен',
@@ -52,8 +43,61 @@ PLANTS = {
 }
 
 
+def get_authenticated_session():
+  """Автоматично влизане в уеб портала и връщане на готова сесия с валидни бисквитки"""
+  session = requests.Session()
+  host = 'https://uni003eu5.fusionsolar.huawei.com'
+
+  session.headers.update({
+      'User-Agent': (
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      ),
+      'Origin': host,
+      'Referer': f'{host}/uniportal/pvmswebsite/assets/build/cloud.html',
+  })
+
+  # 1. Първоначална заявка за вземане на CSRF/Session бисквитки
+  init_url = f'{host}/uniportal/pvmswebsite/assets/build/cloud.html'
+  try:
+    session.get(init_url, timeout=8)
+  except Exception as e:
+    print(f'[SESSION INIT ERROR] {str(e)}', flush=True)
+    return None
+
+  # 2. Логин заявка
+  login_url = f'{host}/uniload/login'
+  login_payload = {
+      'organizationName': '',
+      'username': WEB_USER,
+      'password': WEB_PASS,
+  }
+
+  try:
+    res = session.post(login_url, json=login_payload, timeout=10)
+    print(
+        f'[LOGIN ATTEMPT] Status: {res.status_code} | Res:'
+        f' {res.text[:100]}',
+        flush=True,
+    )
+
+    if res.status_code == 200 and 'html' not in res.text.lower():
+      return session
+    else:
+      print('[LOGIN FAILED] Неуспешен вход с предоставените данни.', flush=True)
+  except Exception as e:
+    print(f'[LOGIN ERROR] {str(e)}', flush=True)
+
+  return None
+
+
 def send_fusionsolar_power_limit_kw(dn_value, kw_value):
-  """Изпращане на заявка за управление на мощността през Web REST ендпоинта"""
+  """Изпращане на заявка през активна сесия"""
+  # Ако нямаме валидна сесия, опитваме да я създадем
+  session = get_authenticated_session()
+
+  if not session:
+    return False, 'Грешка при автентификация/вход във FusionSolar'
+
   url = 'https://uni003eu5.fusionsolar.huawei.com/rest/neteco/config/device/v1/config/power-control'
 
   payload = {
@@ -63,44 +107,28 @@ def send_fusionsolar_power_limit_kw(dn_value, kw_value):
 
   headers = {
       'Accept': 'application/json, text/javascript, */*; q=0.01',
-      'Accept-Language': 'bg-BG,bg;q=0.9,en;q=0.8,de;q=0.7',
-      'Connection': 'keep-alive',
       'Content-Type': 'application/x-www-form-urlencoded',
-      'DNT': '1',
-      'Origin': 'https://uni003eu5.fusionsolar.huawei.com',
-      'Referer': (
-          'https://uni003eu5.fusionsolar.huawei.com/uniportal/pvmswebsite/assets/build/cloud.html?app-id=smartpvms&instance-id=smartpvms&zone-id=region-3-a9ef73df-f438-448e-9c4e-f6439f1d52fa'
-      ),
-      'Sec-Fetch-Dest': 'empty',
-      'Sec-Fetch-Mode': 'cors',
-      'Sec-Fetch-Site': 'same-origin',
-      'User-Agent': (
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,'
-          ' like Gecko) Chrome/150.0.0.0 Safari/537.36'
-      ),
       'X-Requested-With': 'XMLHttpRequest',
-      'roarand': 'c-umbt3tbt8abudf469ek9hhg7bw9juqph7xg806kb8bnvuqtc',
-      'sec-ch-ua': (
-          '"Not;A=Brand";v="8", "Chromium";v="150", "Google Chrome";v="150"'
-      ),
-      'sec-ch-ua-mobile': '?0',
-      'sec-ch-ua-platform': '"Windows"',
-      'x-non-renewal-session': 'true',
-      'x-timezone-offset': '180',
-      'Cookie': FUSIONSOLAR_COOKIES,
   }
 
   try:
     print(
         f'[EXECUTE] Изпращане на {kw_value} kW към {dn_value}...', flush=True
     )
-    response = requests.post(url, headers=headers, data=payload, timeout=10)
+    response = session.post(
+        url, data=payload, headers=headers, timeout=10
+    )
     print(
         f'[EXECUTE RESPONSE] Status: {response.status_code} | Text:'
         f' {response.text[:150]}',
         flush=True,
     )
-    return response.status_code == 200, response.text
+
+    if response.status_code == 200 and 'html' not in response.text.lower():
+      return True, response.text
+    else:
+      return False, f'Сървърът върна HTML (Сесията е отхвърлена)'
+
   except Exception as e:
     print(f'[EXECUTE ERROR] {str(e)}', flush=True)
     return False, str(e)
